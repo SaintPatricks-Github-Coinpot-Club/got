@@ -1,17 +1,17 @@
-import net from 'net';
-import {ClientRequest, IncomingMessage} from 'http';
+import net from 'node:net';
+import type {ClientRequest, IncomingMessage} from 'node:http';
 import unhandler from './utils/unhandle.js';
 
 const reentry: unique symbol = Symbol('reentry');
 const noop = (): void => {};
 
-interface TimedOutOptions {
+type TimedOutOptions = {
 	host?: string;
 	hostname?: string;
 	protocol?: string;
-}
+};
 
-export interface Delays {
+export type Delays = {
 	lookup?: number;
 	socket?: number;
 	connect?: number;
@@ -20,7 +20,7 @@ export interface Delays {
 	response?: number;
 	read?: number;
 	request?: number;
-}
+};
 
 export type ErrorCode =
 	| 'ETIMEDOUT'
@@ -90,7 +90,7 @@ export default function timedOut(request: ClientRequest, delays: Delays, options
 		}
 	});
 
-	if (typeof delays.request !== 'undefined') {
+	if (delays.request !== undefined) {
 		const cancelTimeout = addTimeout(delays.request, timeoutHandler, 'request');
 
 		once(request, 'response', (response: IncomingMessage): void => {
@@ -98,7 +98,7 @@ export default function timedOut(request: ClientRequest, delays: Delays, options
 		});
 	}
 
-	if (typeof delays.socket !== 'undefined') {
+	if (delays.socket !== undefined) {
 		const {socket} = delays;
 
 		const socketTimeoutHandler = (): void => {
@@ -115,10 +115,10 @@ export default function timedOut(request: ClientRequest, delays: Delays, options
 		});
 	}
 
-	const hasLookup = typeof delays.lookup !== 'undefined';
-	const hasConnect = typeof delays.connect !== 'undefined';
-	const hasSecureConnect = typeof delays.secureConnect !== 'undefined';
-	const hasSend = typeof delays.send !== 'undefined';
+	const hasLookup = delays.lookup !== undefined;
+	const hasConnect = delays.connect !== undefined;
+	const hasSecureConnect = delays.secureConnect !== undefined;
+	const hasSend = delays.send !== undefined;
 	if (hasLookup || hasConnect || hasSecureConnect || hasSend) {
 		once(request, 'socket', (socket: net.Socket): void => {
 			const {socketPath} = request as ClientRequest & {socketPath?: string};
@@ -127,7 +127,7 @@ export default function timedOut(request: ClientRequest, delays: Delays, options
 			if (socket.connecting) {
 				const hasPath = Boolean(socketPath ?? net.isIP(hostname ?? host ?? '') !== 0);
 
-				if (hasLookup && !hasPath && typeof (socket.address() as net.AddressInfo).address === 'undefined') {
+				if (hasLookup && !hasPath && (socket.address() as net.AddressInfo).address === undefined) {
 					const cancelTimeout = addTimeout(delays.lookup!, timeoutHandler, 'lookup');
 					once(socket, 'lookup', cancelTimeout);
 				}
@@ -168,14 +168,14 @@ export default function timedOut(request: ClientRequest, delays: Delays, options
 		});
 	}
 
-	if (typeof delays.response !== 'undefined') {
+	if (delays.response !== undefined) {
 		once(request, 'upload-complete', (): void => {
 			const cancelTimeout = addTimeout(delays.response!, timeoutHandler, 'response');
 			once(request, 'response', cancelTimeout);
 		});
 	}
 
-	if (typeof delays.read !== 'undefined') {
+	if (delays.read !== undefined) {
 		once(request, 'response', (response: IncomingMessage): void => {
 			const cancelTimeout = addTimeout(delays.read!, timeoutHandler, 'read');
 			once(response, 'end', cancelTimeout);
@@ -186,7 +186,8 @@ export default function timedOut(request: ClientRequest, delays: Delays, options
 }
 
 declare module 'http' {
+	// eslint-disable-next-line @typescript-eslint/consistent-type-definitions -- This has to be an `interface` to be able to be merged.
 	interface ClientRequest {
-		[reentry]: boolean;
+		[reentry]?: boolean;
 	}
 }

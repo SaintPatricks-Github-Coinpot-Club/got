@@ -1,30 +1,24 @@
-import process from 'process';
-// @ts-expect-error TypeScript incorrectly thinks this is moot
-import {Buffer} from 'buffer';
-import {promisify, inspect} from 'util';
-import {URL, URLSearchParams} from 'url';
-import {checkServerIdentity} from 'tls';
-import {request as httpRequest} from 'http';
-import {request as httpsRequest} from 'https';
-import type {Readable} from 'stream';
-import type {Socket} from 'net';
-import type {SecureContextOptions, DetailedPeerCertificate} from 'tls';
-import type {
-	Agent as HttpAgent,
-	ClientRequest,
-} from 'http';
-import type {
-	RequestOptions as HttpsRequestOptions,
-	Agent as HttpsAgent,
-} from 'https';
-import type {InspectOptions} from 'util';
+import process from 'node:process';
+import type {Buffer} from 'node:buffer';
+import {promisify, inspect, type InspectOptions} from 'node:util';
+import {checkServerIdentity, type SecureContextOptions, type DetailedPeerCertificate} from 'node:tls';
+// DO NOT use destructuring for `https.request` and `http.request` as it's not compatible with `nock`.
+import https, {
+	type RequestOptions as HttpsRequestOptions,
+	type Agent as HttpsAgent,
+} from 'node:https';
+import http, {
+	type Agent as HttpAgent,
+	type ClientRequest,
+} from 'node:http';
+import type {Readable} from 'node:stream';
+import type {Socket} from 'node:net';
 import is, {assert} from '@sindresorhus/is';
 import lowercaseKeys from 'lowercase-keys';
 import CacheableLookup from 'cacheable-lookup';
-import http2wrapper, {ClientHttp2Session} from 'http2-wrapper';
-import {isFormDataLike} from 'form-data-encoder';
-import type {FormDataLike} from 'form-data-encoder';
-import type CacheableRequest from 'cacheable-request';
+import http2wrapper, {type ClientHttp2Session} from 'http2-wrapper';
+import {isFormData, type FormDataLike} from 'form-data-encoder';
+import type {StorageAdapter} from 'cacheable-request';
 import type ResponseLike from 'responselike';
 import type {IncomingMessageWithTimings} from '@szmarczak/http-timer';
 import type {CancelableRequest} from '../as-promise/types.js';
@@ -35,7 +29,7 @@ import type {Delays} from './timed-out.js';
 
 type Promisable<T> = T | Promise<T>;
 
-const [major, minor] = process.versions.node.split('.').map(v => Number(v)) as [number, number, number];
+const [major, minor] = process.versions.node.split('.').map(Number) as [number, number, number];
 
 export type DnsLookupIpVersion = undefined | 4 | 6;
 
@@ -47,25 +41,25 @@ type AcceptableResponse = IncomingMessageWithTimings | ResponseLike;
 type AcceptableRequestResult = Promisable<AcceptableResponse | ClientRequest> | undefined;
 export type RequestFunction = (url: URL, options: NativeRequestOptions, callback?: (response: AcceptableResponse) => void) => AcceptableRequestResult;
 
-export interface Agents {
+export type Agents = {
 	http?: HttpAgent | false;
 	https?: HttpsAgent | false;
 	http2?: unknown | false;
-}
+};
 
 export type Headers = Record<string, string | string[] | undefined>;
 
-export interface ToughCookieJar {
-	getCookieString: ((currentUrl: string, options: Record<string, unknown>, cb: (error: Error | null, cookies: string) => void) => void)
-	& ((url: string, callback: (error: Error | null, cookieHeader: string) => void) => void);
-	setCookie: ((cookieOrString: unknown, currentUrl: string, options: Record<string, unknown>, cb: (error: Error | null, cookie: unknown) => void) => void)
-	& ((rawCookie: string, url: string, callback: (error: Error | null, result: unknown) => void) => void);
-}
+export type ToughCookieJar = {
+	getCookieString: ((currentUrl: string, options: Record<string, unknown>, callback: (error: Error | null, cookies: string) => void) => void) // eslint-disable-line @typescript-eslint/ban-types
+	& ((url: string, callback: (error: Error | null, cookieHeader: string) => void) => void); // eslint-disable-line @typescript-eslint/ban-types
+	setCookie: ((cookieOrString: unknown, currentUrl: string, options: Record<string, unknown>, callback: (error: Error | null, cookie: unknown) => void) => void) // eslint-disable-line @typescript-eslint/ban-types
+	& ((rawCookie: string, url: string, callback: (error: Error | null, result: unknown) => void) => void); // eslint-disable-line @typescript-eslint/ban-types
+};
 
-export interface PromiseCookieJar {
+export type PromiseCookieJar = {
 	getCookieString: (url: string) => Promise<string>;
 	setCookie: (rawCookie: string, url: string) => Promise<unknown>;
-}
+};
 
 export type InitHook = (init: OptionsInit, self: Options) => void;
 export type BeforeRequestHook = (options: Options) => Promisable<void | Response | ResponseLike>;
@@ -77,43 +71,150 @@ export type AfterResponseHook<ResponseType = unknown> = (response: Response<Resp
 /**
 All available hooks of Got.
 */
-export interface Hooks {
+export type Hooks = {
 	/**
-	Called with plain request options, right before their normalization.
+	Called with the plain request options, right before their normalization.
+
+	The second argument represents the current `Options` instance.
+
+	@default []
+
+	**Note:**
+	> - This hook must be synchronous.
+
+	**Note:**
+	> - This is called every time options are merged.
+
+	**Note:**
+	> - The `options` object may not have the `url` property. To modify it, use a `beforeRequest` hook instead.
+
+	**Note:**
+	> - This hook is called when a new instance of `Options` is created.
+	> - Do not confuse this with the creation of `Request` or `got(…)`.
+
+	**Note:**
+	> - When using `got(url)` or `got(url, undefined, defaults)` this hook will **not** be called.
+
 	This is especially useful in conjunction with `got.extend()` when the input needs custom handling.
 
-	__Note #1__: This hook must be synchronous!
-
-	__Note #2__: Errors in this hook will be converted into an instances of `RequestError`.
-
-	__Note #3__: The options object may not have a `url` property.
-	To modify it, use a `beforeRequest` hook instead.
-
-	@default []
-	*/
-	init: InitHook[];
-
-	/**
-	Called with normalized request options.
-	Got will make no further changes to the request before it is sent.
-	This is especially useful in conjunction with `got.extend()` when you want to create an API client that, for example, uses HMAC-signing.
-
-	@default []
-	*/
-	beforeRequest: BeforeRequestHook[];
-
-	/**
-	Called with normalized request options and the redirect response.
-	Got will make no further changes to the request.
-	This is especially useful when you want to avoid dead sites.
-
-	@default []
+	For example, this can be used to fix typos to migrate from older versions faster.
 
 	@example
 	```
 	import got from 'got';
 
-	await got('https://example.com', {
+	const instance = got.extend({
+		hooks: {
+			init: [
+				plain => {
+					if ('followRedirects' in plain) {
+						plain.followRedirect = plain.followRedirects;
+						delete plain.followRedirects;
+					}
+				}
+			]
+		}
+	});
+
+	// Normally, the following would throw:
+	const response = await instance(
+		'https://example.com',
+		{
+			followRedirects: true
+		}
+	);
+
+	// There is no option named `followRedirects`, but we correct it in an `init` hook.
+	```
+
+	Or you can create your own option and store it in a context:
+
+	```
+	import got from 'got';
+
+	const instance = got.extend({
+		hooks: {
+			init: [
+				(plain, options) => {
+					if ('secret' in plain) {
+						options.context.secret = plain.secret;
+						delete plain.secret;
+					}
+				}
+			],
+			beforeRequest: [
+				options => {
+					options.headers.secret = options.context.secret;
+				}
+			]
+		}
+	});
+
+	const {headers} = await instance(
+		'https://httpbin.org/anything',
+		{
+			secret: 'passphrase'
+		}
+	).json();
+
+	console.log(headers.Secret);
+	//=> 'passphrase'
+	```
+	*/
+	init: InitHook[];
+
+	/**
+	Called right before making the request with `options.createNativeRequestOptions()`.
+
+	This hook is especially useful in conjunction with `got.extend()` when you want to sign your request.
+
+	@default []
+
+	**Note:**
+	> - Got will make no further changes to the request before it is sent.
+
+	**Note:**
+	> - Changing `options.json` or `options.form` has no effect on the request. You should change `options.body` instead. If needed, update the `options.headers` accordingly.
+
+	@example
+	```
+	import got from 'got';
+
+	const response = await got.post(
+		'https://httpbin.org/anything',
+		{
+			json: {payload: 'old'},
+			hooks: {
+				beforeRequest: [
+					options => {
+						options.body = JSON.stringify({payload: 'new'});
+						options.headers['content-length'] = options.body.length.toString();
+					}
+				]
+			}
+		}
+	);
+	```
+
+	**Tip:**
+	> - You can indirectly override the `request` function by early returning a [`ClientRequest`-like](https://nodejs.org/api/http.html#http_class_http_clientrequest) instance or a [`IncomingMessage`-like](https://nodejs.org/api/http.html#http_class_http_incomingmessage) instance. This is very useful when creating a custom cache mechanism.
+	> - [Read more about this tip](https://github.com/sindresorhus/got/blob/main/documentation/cache.md#advanced-caching-mechanisms).
+	*/
+	beforeRequest: BeforeRequestHook[];
+
+	/**
+	The equivalent of `beforeRequest` but when redirecting.
+
+	@default []
+
+	**Tip:**
+	> - This is especially useful when you want to avoid dead sites.
+
+	@example
+	```
+	import got from 'got';
+
+	const response = await got('https://example.com', {
 		hooks: {
 			beforeRedirect: [
 				(options, response) => {
@@ -129,19 +230,17 @@ export interface Hooks {
 	beforeRedirect: BeforeRedirectHook[];
 
 	/**
-	Called with an `Error` instance.
-	The error is passed to the hook right before it's thrown.
-	This is especially useful when you want to have more detailed errors.
+	Called with a `RequestError` instance. The error is passed to the hook right before it's thrown.
 
-	__Note__: Errors thrown while normalizing input options are thrown directly and not part of this hook.
+	This is especially useful when you want to have more detailed errors.
 
 	@default []
 
-	@example
 	```
 	import got from 'got';
 
-	await got('https://api.github.com/some-endpoint', {
+	await got('https://api.github.com/repos/sindresorhus/got/commits', {
+		responseType: 'json',
 		hooks: {
 			beforeError: [
 				error => {
@@ -161,26 +260,31 @@ export interface Hooks {
 	beforeError: BeforeErrorHook[];
 
 	/**
-	Called with normalized request options, the error and the retry count.
-  Got will make no further changes to the request.
-	This is especially useful when some extra work is required before the next try.
-
-	__Note__: When using streams, this hook is ignored.
-	__Note__: When retrying in a `afterResponse` hook, all remaining `beforeRetry` hooks will be called without the `error` and `retryCount` arguments.
+	The equivalent of `beforeError` but when retrying. Additionally, there is a second argument `retryCount`, the current retry number.
 
 	@default []
+
+	**Note:**
+	> - When using the Stream API, this hook is ignored.
+
+	**Note:**
+	> - When retrying, the `beforeRequest` hook is called afterwards.
+
+	**Note:**
+	> - If no retry occurs, the `beforeError` hook is called instead.
+
+	This hook is especially useful when you want to retrieve the cause of a retry.
 
 	@example
 	```
 	import got from 'got';
 
-	got.post('https://example.com', {
+	await got('https://httpbin.org/status/500', {
 		hooks: {
 			beforeRetry: [
-				(options, error, retryCount) => {
-					if (error.response.statusCode === 413) { // Payload too large
-						options.body = getNewBody();
-					}
+				(error, retryCount) => {
+					console.log(`Retrying [${retryCount}]: ${error.code}`);
+					// Retrying [1]: ERR_NON_2XX_3XX_RESPONSE
 				}
 			]
 		}
@@ -190,14 +294,15 @@ export interface Hooks {
 	beforeRetry: BeforeRetryHook[];
 
 	/**
-	Called with [response object](#response) and a retry function.
+	Each function should return the response. This is especially useful when you want to refresh an access token.
 
-	Each function should return the response.
-	This is especially useful when you want to refresh an access token.
+	@default []
 
-	__Note__: When using streams, this hook is ignored.
+	**Note:**
+	> - When using the Stream API, this hook is ignored.
 
-	__Note__: Calling the `retryWithMergedOptions` function will trigger `beforeRetry` hooks. If the retry is successful, all remaining `afterResponse` hooks will be called. In case of an error, `beforeRetry` hooks will be called instead.
+	**Note:**
+	> - Calling the `retryWithMergedOptions` function will trigger `beforeRetry` hooks. If the retry is successful, all remaining `afterResponse` hooks will be called. In case of an error, `beforeRetry` hooks will be called instead.
 	Meanwhile the `init`, `beforeRequest` , `beforeRedirect` as well as already executed `afterResponse` hooks will be skipped.
 
 	@example
@@ -208,15 +313,17 @@ export interface Hooks {
 		hooks: {
 			afterResponse: [
 				(response, retryWithMergedOptions) => {
-					if (response.statusCode === 401) { // Unauthorized
+					// Unauthorized
+					if (response.statusCode === 401) {
+						// Refresh the access token
 						const updatedOptions = {
 							headers: {
-								token: getNewToken() // Refresh the access token
+								token: getNewToken()
 							}
 						};
 
-						// Save for further requests
-						instance.defaults.options = got.mergeOptions(instance.defaults.options, updatedOptions);
+						// Update the defaults
+						instance.defaults.options.merge(updatedOptions);
 
 						// Make a new retry
 						return retryWithMergedOptions(updatedOptions);
@@ -227,7 +334,7 @@ export interface Hooks {
 				}
 			],
 			beforeRetry: [
-				(options, error, retryCount) => {
+				error => {
 					// This will be called on `retryWithMergedOptions(...)`
 				}
 			]
@@ -237,7 +344,7 @@ export interface Hooks {
 	```
 	*/
 	afterResponse: AfterResponseHook[];
-}
+};
 
 export type ParseJsonFunction = (text: string) => unknown;
 export type StringifyJsonFunction = (object: unknown) => string;
@@ -263,13 +370,13 @@ export type Method =
 	| 'options'
 	| 'trace';
 
-export interface RetryObject {
+export type RetryObject = {
 	attemptCount: number;
 	retryOptions: RetryOptions;
 	error: RequestError;
 	computedValue: number;
 	retryAfter?: number;
-}
+};
 
 export type RetryFunction = (retryObject: RetryObject) => Promisable<number>;
 
@@ -295,7 +402,7 @@ __Note:__ Got does not retry on `POST` by default.
 __Note:__ If `maxRetryAfter` is set to `undefined`, it will use `options.timeout`.
 __Note:__ If [`Retry-After`](https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Retry-After) header is greater than `maxRetryAfter`, it will cancel the request.
 */
-export interface RetryOptions {
+export type RetryOptions = {
 	limit: number;
 	methods: Method[];
 	statusCodes: number[];
@@ -304,17 +411,17 @@ export interface RetryOptions {
 	backoffLimit: number;
 	noise: number;
 	maxRetryAfter?: number;
-}
+};
 
 export type CreateConnectionFunction = (options: NativeRequestOptions, oncreate: (error: NodeJS.ErrnoException, socket: Socket) => void) => Socket;
 export type CheckServerIdentityFunction = (hostname: string, certificate: DetailedPeerCertificate) => NodeJS.ErrnoException | void;
 
-export interface CacheOptions {
+export type CacheOptions = {
 	shared?: boolean;
 	cacheHeuristic?: number;
 	immutableMinTimeToLive?: number;
 	ignoreCargoCult?: boolean;
-}
+};
 
 type PfxObject = {
 	buffer: string | Buffer;
@@ -323,7 +430,7 @@ type PfxObject = {
 
 type PfxType = string | Buffer | Array<string | Buffer | PfxObject> | undefined;
 
-export interface HttpsOptions {
+export type HttpsOptions = {
 	alpnProtocols?: string[];
 
 	// From `http.RequestOptions` and `tls.CommonConnectionOptions`
@@ -384,24 +491,24 @@ export interface HttpsOptions {
 	dhparam?: SecureContextOptions['dhparam'];
 	ecdhCurve?: SecureContextOptions['ecdhCurve'];
 	certificateRevocationLists?: SecureContextOptions['crl'];
-}
+};
 
-export interface PaginateData<BodyType, ElementType> {
+export type PaginateData<BodyType, ElementType> = {
 	response: Response<BodyType>;
 	currentItems: ElementType[];
 	allItems: ElementType[];
-}
+};
 
-export interface FilterData<ElementType> {
+export type FilterData<ElementType> = {
 	item: ElementType;
 	currentItems: ElementType[];
 	allItems: ElementType[];
-}
+};
 
 /**
 All options accepted by `got.paginate()`.
 */
-export interface PaginationOptions<ElementType, BodyType> {
+export type PaginationOptions<ElementType, BodyType> = {
 	/**
 	A function that transform [`Response`](#response) into an array of items.
 	This is where you should do the parsing.
@@ -506,16 +613,16 @@ export interface PaginationOptions<ElementType, BodyType> {
 	@default false
 	*/
 	stackAllItems?: boolean;
-}
+};
 
-export type SearchParameters = Record<string, string | number | boolean | null | undefined>;
+export type SearchParameters = Record<string, string | number | boolean | null | undefined>; // eslint-disable-line @typescript-eslint/ban-types
 
-function validateSearchParameters(searchParameters: Record<string, unknown>): asserts searchParameters is Record<string, string | number | boolean | null | undefined> {
+function validateSearchParameters(searchParameters: Record<string, unknown>): asserts searchParameters is Record<string, string | number | boolean | null | undefined> { // eslint-disable-line @typescript-eslint/ban-types
 	// eslint-disable-next-line guard-for-in
 	for (const key in searchParameters) {
 		const value = searchParameters[key];
 
-		assert.any([is.string, is.number, is.boolean, is.null_, is.undefined], value);
+		assert.any([is.string, is.number, is.boolean, is.null, is.undefined], value);
 	}
 }
 
@@ -681,14 +788,14 @@ const defaultInternals: Options['_internals'] = {
 	responseType: 'text',
 	url: undefined,
 	pagination: {
-		transform: (response: Response) => {
+		transform(response: Response) {
 			if (response.request.options.responseType === 'json') {
 				return response.body;
 			}
 
 			return JSON.parse(response.body as string);
 		},
-		paginate: ({response}) => {
+		paginate({response}) {
 			const rawLinkHeader = response.headers.link;
 			if (typeof rawLinkHeader !== 'string' || rawLinkHeader.trim() === '') {
 				return false;
@@ -714,6 +821,8 @@ const defaultInternals: Options['_internals'] = {
 	},
 	setHost: true,
 	maxHeaderSize: undefined,
+	signal: undefined,
+	enableUnixSockets: false,
 };
 
 const cloneInternals = (internals: typeof defaultInternals) => {
@@ -841,7 +950,7 @@ const cloneRaw = (raw: OptionsInit) => {
 };
 
 const getHttp2TimeoutOption = (internals: typeof defaultInternals): number | undefined => {
-	const delays = [internals.timeout.socket, internals.timeout.connect, internals.timeout.lookup, internals.timeout.request, internals.timeout.secureConnect].filter(delay => typeof delay === 'number') as number[];
+	const delays = [internals.timeout.socket, internals.timeout.connect, internals.timeout.lookup, internals.timeout.request, internals.timeout.secureConnect].filter(delay => typeof delay === 'number');
 
 	if (delays.length > 0) {
 		return Math.min(...delays);
@@ -861,7 +970,7 @@ const init = (options: OptionsInit, withOptions: OptionsInit, self: Options): vo
 
 export default class Options {
 	private _unixOptions?: NativeRequestOptions;
-	private _internals: InternalsType;
+	private readonly _internals: InternalsType;
 	private _merging: boolean;
 	private readonly _init: OptionsInit[];
 
@@ -963,7 +1072,13 @@ export default class Options {
 				}
 
 				// @ts-expect-error Type 'unknown' is not assignable to type 'never'.
-				this[key as keyof Options] = options[key as keyof Options];
+				const value = options[key as keyof Options];
+				if (value === undefined) {
+					continue;
+				}
+
+				// @ts-expect-error Type 'unknown' is not assignable to type 'never'.
+				this[key as keyof Options] = value;
 
 				push = true;
 			}
@@ -987,7 +1102,7 @@ export default class Options {
 	}
 
 	set request(value: RequestFunction | undefined) {
-		assert.any([is.function_, is.undefined], value);
+		assert.any([is.function, is.undefined], value);
 
 		this._internals.request = value;
 	}
@@ -1027,6 +1142,7 @@ export default class Options {
 				throw new TypeError(`Unexpected agent option: ${key}`);
 			}
 
+			// @ts-expect-error - No idea why `value[key]` doesn't work here.
 			assert.any([is.object, is.undefined], value[key]);
 		}
 
@@ -1095,6 +1211,7 @@ export default class Options {
 				throw new Error(`Unexpected timeout option: ${key}`);
 			}
 
+			// @ts-expect-error - No idea why `value[key]` doesn't work here.
 			assert.any([is.number, is.undefined], value[key]);
 		}
 
@@ -1191,7 +1308,7 @@ export default class Options {
 	}
 
 	set body(value: string | Buffer | Readable | Generator | AsyncGenerator | FormDataLike | undefined) {
-		assert.any([is.string, is.buffer, is.nodeStream, is.generator, is.asyncGenerator, isFormDataLike, is.undefined], value);
+		assert.any([is.string, is.buffer, is.nodeStream, is.generator, is.asyncGenerator, isFormData, is.undefined], value);
 
 		if (is.nodeStream(value)) {
 			assert.truthy(value.readable);
@@ -1236,13 +1353,11 @@ export default class Options {
 
 	__Note #2__: This option is not enumerable and will not be merged with the instance defaults.
 	*/
-	get json(): Record<string, any> | undefined {
+	get json(): unknown {
 		return this._internals.json;
 	}
 
-	set json(value: Record<string, any> | undefined) {
-		assert.any([is.object, is.undefined], value);
-
+	set json(value: unknown) {
 		if (value !== undefined) {
 			assert.undefined(this._internals.body);
 			assert.undefined(this._internals.form);
@@ -1288,7 +1403,6 @@ export default class Options {
 		const urlString = `${this.prefixUrl as string}${value.toString()}`;
 		const url = new URL(urlString);
 		this._internals.url = url;
-		decodeURI(urlString);
 
 		if (url.protocol === 'unix:') {
 			url.href = `http://unix${url.pathname}${url.search}`;
@@ -1317,6 +1431,10 @@ export default class Options {
 		}
 
 		if (url.hostname === 'unix') {
+			if (!this._internals.enableUnixSockets) {
+				throw new Error('Using UNIX domain sockets but option `enableUnixSockets` is not enabled');
+			}
+
 			const matches = /(?<socketPath>.+?):(?<path>.+)/.exec(`${url.pathname}${url.search}`);
 
 			if (matches?.groups) {
@@ -1356,8 +1474,8 @@ export default class Options {
 
 		let {setCookie, getCookieString} = value;
 
-		assert.function_(setCookie);
-		assert.function_(getCookieString);
+		assert.function(setCookie);
+		assert.function(getCookieString);
 
 		/* istanbul ignore next: Horrible `tough-cookie` v3 check */
 		if (setCookie.length === 4 && getCookieString.length === 0) {
@@ -1371,6 +1489,34 @@ export default class Options {
 		} else {
 			this._internals.cookieJar = value;
 		}
+	}
+
+	/**
+	You can abort the `request` using [`AbortController`](https://developer.mozilla.org/en-US/docs/Web/API/AbortController).
+
+	@example
+	```
+	import got from 'got';
+
+	const abortController = new AbortController();
+
+	const request = got('https://httpbin.org/anything', {
+		signal: abortController.signal
+	});
+
+	setTimeout(() => {
+		abortController.abort();
+	}, 100);
+	```
+	*/
+	get signal(): AbortSignal | undefined {
+		return this._internals.signal;
+	}
+
+	set signal(value: AbortSignal | undefined) {
+		assert.object(value);
+
+		this._internals.signal = value;
 	}
 
 	/**
@@ -1489,7 +1635,7 @@ export default class Options {
 	}
 
 	set dnsLookup(value: CacheableLookup['lookup'] | undefined) {
-		assert.any([is.function_, is.undefined], value);
+		assert.any([is.function, is.undefined], value);
 
 		this._internals.dnsLookup = value;
 	}
@@ -1583,14 +1729,13 @@ export default class Options {
 			}
 
 			const typedKnownHookEvent = knownHookEvent as keyof Hooks;
-			const typedValue = value as Hooks;
-			const hooks = typedValue[typedKnownHookEvent];
+			const hooks = value[typedKnownHookEvent];
 
 			assert.any([is.array, is.undefined], hooks);
 
 			if (hooks) {
 				for (const hook of hooks) {
-					assert.function_(hook);
+					assert.function(hook);
 				}
 			}
 
@@ -1611,19 +1756,21 @@ export default class Options {
 	}
 
 	/**
-	Defines if redirect responses should be followed automatically.
+	Whether redirect responses should be followed automatically.
+
+ 	Optionally, pass a function to dynamically decide based on the response object.
 
 	Note that if a `303` is sent by the server in response to any request type (`POST`, `DELETE`, etc.), Got will automatically request the resource pointed to in the location header via `GET`.
-	This is in accordance with [the spec](https://tools.ietf.org/html/rfc7231#section-6.4.4).
+	This is in accordance with [the spec](https://tools.ietf.org/html/rfc7231#section-6.4.4). You can optionally turn on this behavior also for other redirect codes - see `methodRewriting`.
 
 	@default true
 	*/
-	get followRedirect(): boolean {
+	get followRedirect(): boolean | ((response: PlainResponse) => boolean) {
 		return this._internals.followRedirect;
 	}
 
-	set followRedirect(value: boolean) {
-		assert.boolean(value);
+	set followRedirect(value: boolean | ((response: PlainResponse) => boolean)) {
+		assert.any([is.boolean, is.function], value);
 
 		this._internals.followRedirect = value;
 	}
@@ -1656,11 +1803,11 @@ export default class Options {
 
 	@default false
 	*/
-	get cache(): string | CacheableRequest.StorageAdapter | boolean | undefined {
+	get cache(): string | StorageAdapter | boolean | undefined {
 		return this._internals.cache;
 	}
 
-	set cache(value: string | CacheableRequest.StorageAdapter | boolean | undefined) {
+	set cache(value: string | StorageAdapter | boolean | undefined) {
 		assert.any([is.object, is.string, is.boolean, is.undefined], value);
 
 		if (value === true) {
@@ -1769,7 +1916,7 @@ export default class Options {
 	However, the [HTTP/2 specification](https://tools.ietf.org/html/rfc7540#section-8.1.3) says that `An HTTP GET request includes request header fields and no payload body`, therefore when using the HTTP/2 protocol this option will have no effect.
 	This option is only meant to interact with non-compliant servers when you have no other choice.
 
-	__Note__: The [RFC 7321](https://tools.ietf.org/html/rfc7231#section-4.3.1) doesn't specify any particular behavior for the GET method having a payload, therefore __it's considered an [anti-pattern](https://en.wikipedia.org/wiki/Anti-pattern)__.
+	__Note__: The [RFC 7231](https://tools.ietf.org/html/rfc7231#section-4.3.1) doesn't specify any particular behavior for the GET method having a payload, therefore __it's considered an [anti-pattern](https://en.wikipedia.org/wiki/Anti-pattern)__.
 
 	@default false
 	*/
@@ -1805,9 +1952,12 @@ export default class Options {
 	}
 
 	/**
-	Specifies if the redirects should be [rewritten as `GET`](https://tools.ietf.org/html/rfc7231#section-6.4).
+	Specifies if the HTTP request method should be [rewritten as `GET`](https://tools.ietf.org/html/rfc7231#section-6.4) on redirects.
 
-	If `false`, when sending a POST request and receiving a `302`, it will resend the body to the new location using the same HTTP method (`POST` in this case).
+	As the [specification](https://tools.ietf.org/html/rfc7231#section-6.4) prefers to rewrite the HTTP method only on `303` responses, this is Got's default behavior.
+	Setting `methodRewriting` to `true` will also rewrite `301` and `302` responses, as allowed by the spec. This is the behavior followed by `curl` and browsers.
+
+	__Note__: Got never performs method rewriting on `307` and `308` responses, as this is [explicitly prohibited by the specification](https://www.rfc-editor.org/rfc/rfc7231#section-6.4.7).
 
 	@default false
 	*/
@@ -1863,7 +2013,7 @@ export default class Options {
 	}
 
 	set parseJson(value: ParseJsonFunction) {
-		assert.function_(value);
+		assert.function(value);
 
 		this._internals.parseJson = value;
 	}
@@ -1914,7 +2064,7 @@ export default class Options {
 	}
 
 	set stringifyJson(value: StringifyJsonFunction) {
-		assert.function_(value);
+		assert.function(value);
 
 		this._internals.stringifyJson = value;
 	}
@@ -1948,7 +2098,7 @@ export default class Options {
 	set retry(value: Partial<RetryOptions>) {
 		assert.plainObject(value);
 
-		assert.any([is.function_, is.undefined], value.calculateDelay);
+		assert.any([is.function, is.undefined], value.calculateDelay);
 		assert.any([is.number, is.undefined], value.maxRetryAfter);
 		assert.any([is.number, is.undefined], value.limit);
 		assert.any([is.array, is.undefined], value.methods);
@@ -2014,7 +2164,7 @@ export default class Options {
 	}
 
 	set createConnection(value: CreateConnectionFunction | undefined) {
-		assert.any([is.function_, is.undefined], value);
+		assert.any([is.function, is.undefined], value);
 
 		this._internals.createConnection = value;
 	}
@@ -2060,7 +2210,7 @@ export default class Options {
 		assert.plainObject(value);
 
 		assert.any([is.boolean, is.undefined], value.rejectUnauthorized);
-		assert.any([is.function_, is.undefined], value.checkServerIdentity);
+		assert.any([is.function, is.undefined], value.checkServerIdentity);
 		assert.any([is.string, is.object, is.array, is.undefined], value.certificateAuthority);
 		assert.any([is.string, is.object, is.array, is.undefined], value.key);
 		assert.any([is.string, is.object, is.array, is.undefined], value.certificate);
@@ -2234,6 +2384,17 @@ export default class Options {
 		this._internals.maxHeaderSize = value;
 	}
 
+	get enableUnixSockets() {
+		return this._internals.enableUnixSockets;
+	}
+
+	set enableUnixSockets(value: boolean) {
+		assert.boolean(value);
+
+		this._internals.enableUnixSockets = value;
+	}
+
+	// eslint-disable-next-line @typescript-eslint/naming-convention
 	toJSON() {
 		return {...this._internals};
 	}
@@ -2268,6 +2429,7 @@ export default class Options {
 			...this._unixOptions,
 
 			// HTTPS options
+			// eslint-disable-next-line @typescript-eslint/naming-convention
 			ALPNProtocols: https.alpnProtocols,
 			ca: https.certificateAuthority,
 			cert: https.certificate,
@@ -2333,10 +2495,10 @@ export default class Options {
 				return http2wrapper.auto as RequestFunction;
 			}
 
-			return httpsRequest;
+			return https.request;
 		}
 
-		return httpRequest;
+		return http.request;
 	}
 
 	freeze() {
@@ -2359,6 +2521,5 @@ export default class Options {
 		Object.freeze(options.retry.errorCodes);
 		Object.freeze(options.retry.methods);
 		Object.freeze(options.retry.statusCodes);
-		Object.freeze(options.context);
 	}
 }

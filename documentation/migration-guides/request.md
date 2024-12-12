@@ -46,7 +46,7 @@ These Got options are the same as with Request:
 - [`localAddress`](../2-options.md#localaddress)
 - [`headers`](../2-options.md#headers)
 - [`createConnection`](../2-options.md#createconnection)
-- [UNIX sockets](../tips.md#unixsockets): `http://unix:SOCKET:PATH`
+- [UNIX sockets](../2-options.md#enableunixsockets): `http://unix:SOCKET:PATH`
 
 The `time` option does not exist, assume [it's always true](../6-timeout.md).
 
@@ -62,7 +62,7 @@ Readability is very important to us, so we have different names for these option
 - `qs` → [`searchParams`](../2-options.md#serachparams)
 - `strictSSL` → [`rejectUnauthorized`](../2-options.md#rejectunauthorized)
 - `gzip` → [`decompress`](../2-options.md#decompress)
-- `jar` → [`cookieJar`](../2-options.md#cookiejar) (accepts [`tough-cookie`](../https://github.com/salesforce/tough-cookie) jar)
+- `jar` → [`cookieJar`](../2-options.md#cookiejar) (accepts [`tough-cookie`](https://github.com/salesforce/tough-cookie) jar)
 - `jsonReviver` → [`parseJson`](../2-options.md#parsejson)
 - `jsonReplacer` → [`stringifyJson`](../2-options.md#stringifyjson)
 
@@ -113,15 +113,12 @@ http.createServer((serverRequest, serverResponse) => {
 The cool feature here is that Request can proxy headers with the stream, but Got can do that too!
 
 ```js
-import {promisify} from 'util';
-import stream from 'stream';
+import {pipeline as streamPipeline} from 'node:stream/promises';
 import got from 'got';
-
-const pipeline = promisify(stream.pipeline);
 
 const server = http.createServer(async (serverRequest, serverResponse) => {
 	if (serverRequest.url === '/doodle.png') {
-		await pipeline(
+		await streamPipeline(
 			got.stream('https://example.com/doodle.png'),
 			serverResponse
 		);

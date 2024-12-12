@@ -17,30 +17,40 @@ This constructor takes the same arguments as the Got promise.
 
 **Note:**
 > When piping to [`ServerResponse`](https://nodejs.org/api/http.html#http_class_http_serverresponse), the headers will be automatically copied.\
-> In order to prevent this behavior you need to override the request headers in a [`beforeRequest`](hooks.md#beforerequest) hook.
+> In order to prevent this behavior you need to override the request headers in a [`beforeRequest`](9-hooks.md#beforerequest) hook.
 
 **Note:**
 > If the `body`, `json` or `form` option is used, this stream will be read-only.
 
+**Note:**
+> - While `got.post('https://example.com')` resolves, `got.stream.post('https://example.com')` will hang indefinitely until a body is provided.
+> - If there's no body on purpose, remember to `stream.end()` or set the body option to an empty string.
+
 ```js
-import {promisify} from 'util';
-import stream from 'stream';
-import fs from 'fs';
+import stream from 'node:stream';
+import {pipeline as streamPipeline} from 'node:stream/promises';
+import fs from 'node:fs';
 import got from 'got';
 
-const pipeline = promisify(stream.pipeline);
-
-await pipeline(
+// This example streams the GET response of a URL to a file.
+await streamPipeline(
 	got.stream('https://sindresorhus.com'),
 	fs.createWriteStream('index.html')
 );
 
 // For POST, PUT, PATCH, and DELETE methods, `got.stream` returns a `stream.Writable`.
-await pipeline(
+// This example POSTs the contents of a file to a URL.
+await streamPipeline(
 	fs.createReadStream('index.html'),
 	got.stream.post('https://sindresorhus.com'),
 	new stream.PassThrough()
 );
+
+// In order to POST, PUT, PATCH, or DELETE without a request body, explicitly specify an empty body:
+await streamPipeline(
+	got.stream.post('https://sindresorhus.com', { body: '' }),
+	new stream.PassThrough()
+)
 ```
 
 Please note that `new stream.PassThrough()` is required in order to catch read errors.\
@@ -49,10 +59,6 @@ In other words, it would only check errors when writing.
 
 **Tip:**
 > - Avoid `from.pipe(to)` as it doesn't forward errors.
-
-**Note:**
-> - While `got.post('https://example.com')` resolves, `got.stream.post('https://example.com')` will hang indefinitely until a body is provided.
-> - If there's no body on purpose, remember to `stream.end()` or set the body option to an empty string.
 
 ### `stream.options`
 
@@ -164,6 +170,50 @@ Whether the socket was used for other previous requests.
 
 ## Events
 
+### `stream.on('response', …)`
+
+#### `response`
+
+**Type: [`PlainResponse`](typescript.md#plainresponse)**
+
+This is emitted when a HTTP response is received.
+
+```js
+import {pipeline as streamPipeline} from 'node:stream/promises';
+import {createWriteStream} from 'node:fs';
+import got from 'got';
+
+const readStream = got.stream('http://example.com/image.png', {throwHttpErrors: false});
+
+const onError = error => {
+	// Do something with it.
+};
+
+readStream.on('response', async response => {
+	if (response.headers.age > 3600) {
+		console.log('Failure - response too old');
+		readStream.destroy(); // Destroy the stream to prevent hanging resources.
+		return;
+	}
+
+	// Prevent `onError` being called twice.
+	readStream.off('error', onError);
+
+	try {
+		await streamPipeline(
+			readStream,
+			createWriteStream('image.png')
+		);
+
+		console.log('Success');
+	} catch (error) {
+		onError(error);
+	}
+});
+
+readStream.once('error', onError);
+```
+
 ### `stream.on('downloadProgress', …)`
 
 #### `progress`
@@ -187,55 +237,59 @@ To enable retrying when using streams, a retry handler must be attached.
 
 When this event is emitted, you should reset the stream you were writing to and prepare the body again.
 
+**Note:**
+> - [`HTTPError`s](./8-errors.md#httperror) cannot be retried if [`options.throwHttpErrors`](./2-options.md#throwhttperrors) is `false`.
+>   This is because stream data is saved to `error.response.body` and streams can be read only once.
+> - For the Promise API, there is no such limitation.
+
 #### `retryCount`
 
 **Type: `number`**
 
-The current retry count. This property must override the one in `stream` when retrying.
-
-```js
-import fs from 'fs';
-import got from 'got';
-
-let writeStream;
-
-const fn = (retryCount = 0, error) => {
-	// We want to inherit options from previous retries,
-	// as well as the `beforeRetry` hook.
-	const defaults = error ? error.options : undefined;
-
-	// Omitting options on reuse is important.
-	// This way we avoid duplicating query params and hooks.
-	const options = defaults ? undefined : {
-		headers: {
-			foo: 'bar'
-		},
-	};
-
-	const stream = got.stream('https://example.com', options, defaults);
-	stream.retryCount = retryCount;
-
-	if (writeStream) {
-		writeStream.destroy();
-	}
-
-	writeStream = fs.createWriteStream('example.com');
-
-	stream.pipe(writeStream);
-
-	// If you don't attach the listener, it will NOT make a retry.
-	// It automatically checks the listener count so it knows whether to retry or not :)
-	stream.once('retry', fn);
-};
-
-fn();
-```
+The current retry count.
 
 #### `error`
 
 **Type: [`RequestError`](8-errors.md#requesterror)**
 
 The error that caused this retry.
+
+#### `createRetryStream`
+
+**Type: `(options?: OptionsInit) => Request`**
+
+```js
+import fs from 'node:fs';
+import got from 'got';
+
+let writeStream;
+
+const fn = retryStream => {
+	const options = {
+		headers: {
+			foo: 'bar'
+		},
+	};
+
+	const stream = retryStream ?? got.stream('https://example.com', options);
+
+	if (writeStream) {
+		writeStream.destroy();
+	}
+
+	writeStream = fs.createWriteStream('example-com.html');
+
+	stream.pipe(writeStream);
+
+	// If you don't attach the listener, it will NOT make a retry.
+	// It automatically checks the listener count so it knows whether to retry or not :)
+	stream.once('retry', (retryCount, error, createRetryStream) => {
+		fn(createRetryStream()); // or: fn(createRetryStream(optionsToMerge))
+	});
+};
+
+fn();
+```
 
 ### `stream.on('redirect', …)`
 
@@ -310,6 +364,18 @@ The server's IP address.
 **Type: `boolean`**
 
 Whether the response comes from cache or not.
+
+### `ok`
+
+**Type: `boolean`**
+
+Whether the response was successful
+
+**Note:**
+> - A request is successful when the status code of the final request is `2xx` or `3xx`.
+> - When [following redirects](2-options.md#followredirect), a request is successful **only** when the status code of the final request is `2xx`.
+> - `304` responses are always considered successful.
+> - Got throws automatically when `response.ok` is `false` and `throwHttpErrors` is `true`.
 
 ### `statusCode`
 

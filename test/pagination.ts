@@ -1,11 +1,10 @@
-import {Buffer} from 'buffer';
-import {URL} from 'url';
+import {Buffer} from 'node:buffer';
 import test from 'ava';
 import delay from 'delay';
 import getStream from 'get-stream';
-import got, {Response} from '../source/index.js';
+import got, {type Response} from '../source/index.js';
 import withServer, {withBodyParsingServer} from './helpers/with-server.js';
-import {ExtendedHttpTestServer} from './helpers/create-http-test-server';
+import type {ExtendedHttpTestServer} from './helpers/create-http-test-server.js';
 
 const thrower = (): any => {
 	throw new Error('This should not be called');
@@ -100,7 +99,7 @@ test('filters elements', withServer, async (t, server, got) => {
 
 	const result = await got.paginate.all<number>({
 		pagination: {
-			filter: ({item, currentItems, allItems}) => {
+			filter({item, currentItems, allItems}) {
 				t.true(Array.isArray(allItems));
 				t.true(Array.isArray(currentItems));
 
@@ -141,7 +140,7 @@ test('custom paginate function', withServer, async (t, server, got) => {
 
 	const result = await got.paginate.all<number>({
 		pagination: {
-			paginate: ({response}) => {
+			paginate({response}) {
 				const url = new URL(response.url);
 
 				if (url.search === '?page=3') {
@@ -163,7 +162,7 @@ test('custom paginate function using allItems', withServer, async (t, server, go
 
 	const result = await got.paginate.all<number>({
 		pagination: {
-			paginate: ({allItems, response}) => {
+			paginate({allItems, response}) {
 				if (allItems.length === 2) {
 					return false;
 				}
@@ -184,7 +183,7 @@ test('custom paginate function using currentItems', withServer, async (t, server
 
 	const result = await got.paginate.all<number>({
 		pagination: {
-			paginate: ({currentItems, response}) => {
+			paginate({currentItems, response}) {
 				if (currentItems[0] === 3) {
 					return false;
 				}
@@ -228,7 +227,7 @@ test('`shouldContinue` works', withServer, async (t, server, got) => {
 
 	const options = {
 		pagination: {
-			shouldContinue: ({currentItems, allItems}: {allItems: number[]; currentItems: number[]}) => {
+			shouldContinue({currentItems, allItems}: {allItems: number[]; currentItems: number[]}) {
 				t.true(Array.isArray(allItems));
 				t.true(Array.isArray(currentItems));
 
@@ -367,7 +366,7 @@ test('`hooks` are not duplicated', withServer, async (t, server, got) => {
 
 	const result = await got.paginate.all<number>({
 		pagination: {
-			paginate: ({response}) => {
+			paginate({response}) {
 				if ((response.body as string) === '[3]') {
 					return false; // Stop after page 3
 				}
@@ -421,7 +420,7 @@ test('allowGetBody sends correct json payload with .paginate()', withServer, asy
 		},
 		json: {body},
 		pagination: {
-			paginate: () => {
+			paginate() {
 				if (body.length === 2) {
 					return false;
 				}
@@ -497,17 +496,17 @@ test('`stackAllItems` set to true', withServer, async (t, server, got) => {
 	const result = await got.paginate.all<number>({
 		pagination: {
 			stackAllItems: true,
-			filter: ({allItems}) => {
+			filter({allItems}) {
 				t.is(allItems.length, itemCount);
 
 				return true;
 			},
-			shouldContinue: ({allItems}) => {
+			shouldContinue({allItems}) {
 				t.is(allItems.length, itemCount);
 
 				return true;
 			},
-			paginate: ({response, currentItems, allItems}) => {
+			paginate({response, currentItems, allItems}) {
 				itemCount += 1;
 				t.is(allItems.length, itemCount);
 
@@ -525,17 +524,17 @@ test('`stackAllItems` set to false', withServer, async (t, server, got) => {
 	const result = await got.paginate.all<number>({
 		pagination: {
 			stackAllItems: false,
-			filter: ({allItems}) => {
+			filter({allItems}) {
 				t.is(allItems.length, 0);
 
 				return true;
 			},
-			shouldContinue: ({allItems}) => {
+			shouldContinue({allItems}) {
 				t.is(allItems.length, 0);
 
 				return true;
 			},
-			paginate: ({response, currentItems, allItems}) => {
+			paginate({response, currentItems, allItems}) {
 				t.is(allItems.length, 0);
 
 				return got.defaults.options.pagination.paginate!({response, allItems, currentItems});
@@ -557,10 +556,10 @@ test('next url in json response', withServer, async (t, server, got) => {
 		}));
 	});
 
-	interface Page {
+	type Page = {
 		currentUrl: string;
 		next?: string;
-	}
+	};
 
 	const all = await got.paginate.all('', {
 		searchParams: {
@@ -569,7 +568,7 @@ test('next url in json response', withServer, async (t, server, got) => {
 		responseType: 'json',
 		pagination: {
 			transform: (response: Response<Page>) => [response.body.currentUrl],
-			paginate: ({response}) => {
+			paginate({response}) {
 				const {next} = response.body;
 
 				if (!next) {
@@ -604,10 +603,10 @@ test('pagination using searchParams', withServer, async (t, server, got) => {
 		}));
 	});
 
-	interface Page {
+	type Page = {
 		currentUrl: string;
 		next?: string;
-	}
+	};
 
 	const all = await got.paginate.all('', {
 		searchParams: {
@@ -616,7 +615,7 @@ test('pagination using searchParams', withServer, async (t, server, got) => {
 		responseType: 'json',
 		pagination: {
 			transform: (response: Response<Page>) => [response.body.currentUrl],
-			paginate: ({response}) => {
+			paginate({response}) {
 				const {next} = response.body;
 				// eslint-disable-next-line unicorn/prevent-abbreviations
 				const searchParams = response.request.options.searchParams as URLSearchParams;
@@ -654,10 +653,10 @@ test('pagination using extended searchParams', withServer, async (t, server, got
 		}));
 	});
 
-	interface Page {
+	type Page = {
 		currentUrl: string;
 		next?: string;
-	}
+	};
 
 	const client = got.extend({
 		searchParams: {
@@ -672,7 +671,7 @@ test('pagination using extended searchParams', withServer, async (t, server, got
 		responseType: 'json',
 		pagination: {
 			transform: (response: Response<Page>) => [response.body.currentUrl],
-			paginate: ({response}) => {
+			paginate({response}) {
 				const {next} = response.body;
 				// eslint-disable-next-line unicorn/prevent-abbreviations
 				const searchParams = response.request.options.searchParams as URLSearchParams;

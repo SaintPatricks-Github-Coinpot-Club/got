@@ -1,12 +1,11 @@
-import {URL} from 'url';
-import https from 'https';
-import axios from 'axios';
+import https from 'node:https';
+/// import axios from 'axios';
 import Benchmark from 'benchmark';
 import fetch from 'node-fetch';
 import request from 'request';
 import got from '../source/index.js';
 import Request from '../source/core/index.js';
-import Options, {OptionsInit} from '../source/core/options.js';
+import Options, {type OptionsInit} from '../source/core/options.js';
 
 // Configuration
 const httpsAgent = new https.Agent({
@@ -32,6 +31,7 @@ const gotOptions: OptionsInit & {isStream?: true} = {
 const normalizedGotOptions = new Options(url, gotOptions);
 
 const requestOptions = {
+	// eslint-disable-next-line @typescript-eslint/naming-convention
 	strictSSL: false,
 	agent: httpsAgent,
 };
@@ -40,18 +40,18 @@ const fetchOptions = {
 	agent: httpsAgent,
 };
 
-const axiosOptions = {
-	url: urlString,
-	httpsAgent,
-	https: {
-		rejectUnauthorized: false,
-	},
-};
+/// const axiosOptions = {
+// 	url: urlString,
+// 	httpsAgent,
+// 	https: {
+// 		rejectUnauthorized: false,
+// 	},
+// };
 
-const axiosStreamOptions: typeof axiosOptions & {responseType: 'stream'} = {
-	...axiosOptions,
-	responseType: 'stream',
-};
+// const axiosStreamOptions: typeof axiosOptions & {responseType: 'stream'} = {
+// 	...axiosOptions,
+// 	responseType: 'stream',
+// };
 
 const httpsOptions = {
 	https: {
@@ -65,20 +65,20 @@ const suite = new Benchmark.Suite();
 // Benchmarking
 suite.add('got - promise', {
 	defer: true,
-	fn: async (deferred: {resolve: () => void}) => {
+	async fn(deferred: {resolve: () => void}) {
 		await got(url, gotOptions);
 		deferred.resolve();
 	},
 }).add('got - stream', {
 	defer: true,
-	fn: async (deferred: {resolve: () => void}) => {
+	async fn(deferred: {resolve: () => void}) {
 		got.stream(url, gotOptions).resume().once('end', () => {
 			deferred.resolve();
 		});
 	},
 }).add('got - core', {
 	defer: true,
-	fn: async (deferred: {resolve: () => void}) => {
+	async fn(deferred: {resolve: () => void}) {
 		const stream = new Request(url, gotOptions);
 		void stream.flush();
 		stream.resume().once('end', () => {
@@ -87,7 +87,7 @@ suite.add('got - promise', {
 	},
 }).add('got - core - normalized options', {
 	defer: true,
-	fn: async (deferred: {resolve: () => void}) => {
+	async fn(deferred: {resolve: () => void}) {
 		const stream = new Request(undefined, undefined, normalizedGotOptions);
 		void stream.flush();
 		stream.resume().once('end', () => {
@@ -96,7 +96,7 @@ suite.add('got - promise', {
 	},
 }).add('request - callback', {
 	defer: true,
-	fn: (deferred: {resolve: () => void}) => {
+	fn(deferred: {resolve: () => void}) {
 		request(urlString, requestOptions, (error: Error) => {
 			if (error) {
 				throw error;
@@ -107,7 +107,7 @@ suite.add('got - promise', {
 	},
 }).add('request - stream', {
 	defer: true,
-	fn: (deferred: {resolve: () => void}) => {
+	fn(deferred: {resolve: () => void}) {
 		const stream = request(urlString, requestOptions);
 		stream.resume();
 		stream.once('end', () => {
@@ -116,40 +116,46 @@ suite.add('got - promise', {
 	},
 }).add('node-fetch - promise', {
 	defer: true,
-	fn: async (deferred: {resolve: () => void}) => {
-		const response = await fetch(url, fetchOptions);
+	async fn(deferred: {resolve: () => void}) {
+		const response = await fetch(urlString, fetchOptions);
 		await response.text();
 
 		deferred.resolve();
 	},
 }).add('node-fetch - stream', {
 	defer: true,
-	fn: async (deferred: {resolve: () => void}) => {
-		const {body} = await fetch(url, fetchOptions);
+	async fn(deferred: {resolve: () => void}) {
+		const {body} = await fetch(urlString, fetchOptions);
 
-		body.resume();
-		body.once('end', () => {
+		body!.resume();
+		body!.once('end', () => {
 			deferred.resolve();
 		});
 	},
 }).add('axios - promise', {
 	defer: true,
-	fn: async (deferred: {resolve: () => void}) => {
-		await axios.request(axiosOptions);
+	async fn(deferred: {resolve: () => void}) {
+		// Disabled until it has correct types.
+		// await axios.request(axiosOptions);
 		deferred.resolve();
 	},
 }).add('axios - stream', {
 	defer: true,
-	fn: async (deferred: {resolve: () => void}) => {
-		const {data} = await axios.request(axiosStreamOptions);
-		data.resume();
-		data.once('end', () => {
-			deferred.resolve();
-		});
+	async fn(deferred: {resolve: () => void}) {
+		// Disabled until it has correct types.
+		// const result = await axios.request(axiosStreamOptions);
+		// const {data}: any = result;
+
+		// data.resume();
+		// data.once('end', () => {
+		// 	deferred.resolve();
+		// });
+
+		deferred.resolve();
 	},
 }).add('https - stream', {
 	defer: true,
-	fn: (deferred: {resolve: () => void}) => {
+	fn(deferred: {resolve: () => void}) {
 		https.request(urlString, httpsOptions, response => {
 			response.resume();
 			response.once('end', () => {
@@ -170,7 +176,7 @@ const internalBenchmark = (): void => {
 
 	const internalSuite = new Benchmark.Suite();
 	internalSuite.add('got - normalize options', {
-		fn: () => {
+		fn() {
 			// eslint-disable-next-line no-new
 			new Options(url, gotOptions);
 		},

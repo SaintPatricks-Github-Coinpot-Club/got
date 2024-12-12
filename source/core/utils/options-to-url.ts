@@ -1,7 +1,5 @@
-/* istanbul ignore file: deprecated */
-import {URL} from 'url';
-
-export interface URLOptions {
+// eslint-disable-next-line @typescript-eslint/naming-convention
+export type URLOptions = {
 	href?: string;
 	protocol?: string;
 	host?: string;
@@ -11,7 +9,7 @@ export interface URLOptions {
 	search?: string;
 	searchParams?: unknown;
 	path?: string;
-}
+};
 
 const keys: Array<Exclude<keyof URLOptions, 'searchParams' | 'path'>> = [
 	'protocol',
@@ -65,7 +63,7 @@ export default function optionsToUrl(origin: string, options: URLOptions): URL {
 
 	for (const key of keys) {
 		if (options[key]) {
-			url[key] = options[key]!.toString();
+			url[key] = options[key].toString();
 		}
 	}
 

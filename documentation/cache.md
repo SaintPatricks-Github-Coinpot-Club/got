@@ -2,7 +2,7 @@
 
 ## Cache
 
-Got implements [RFC 7234](https://httpwg.org/specs/rfc7234.html) compliant HTTP caching which works out of the box in-memory and is easily pluggable with a wide range of storage adapters. Fresh cache entries are served directly from the cache, and stale cache entries are revalidated with `If-None-Match` / `If-Modified-Since` headers. You can read more about the underlying cache behavior in the [`cacheable-request` documentation](https://github.com/lukechilds/cacheable-request).
+Got implements [RFC 7234](https://httpwg.org/specs/rfc7234.html) compliant HTTP caching which works out of the box in-memory and is easily pluggable with a wide range of storage adapters. Fresh cache entries are served directly from the cache, and stale cache entries are revalidated with `If-None-Match` / `If-Modified-Since` headers. You can read more about the underlying cache behavior in the [`cacheable-request` documentation](https://www.npmjs.com/package/cacheable-request).
 
 You can use the JavaScript `Map` type as an in-memory cache:
 
@@ -66,8 +66,8 @@ View the [Keyv docs](https://github.com/lukechilds/keyv) for more information on
 The `request` function may return an instance of `IncomingMessage`-like class.
 
 ```js
-import https from 'https';
-import {Readable} from 'stream';
+import https from 'node:https';
+import {Readable} from 'node:stream';
 import got from 'got';
 
 const getCachedResponse = (url, options) => {
@@ -106,8 +106,8 @@ console.log(body);
 If you don't want to alter the `request` function, you can return a cached response in a `beforeRequest` hook:
 
 ```js
-import https from 'https';
-import {Readable} from 'stream';
+import https from 'node:https';
+import {Readable} from 'node:stream';
 import got from 'got';
 
 const getCachedResponse = (url, options) => {

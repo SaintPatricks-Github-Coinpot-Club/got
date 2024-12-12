@@ -1,15 +1,20 @@
-import {Buffer} from 'buffer';
-import {URL} from 'url';
-import {Agent as HttpAgent} from 'http';
-import test, {Constructor} from 'ava';
+import {Buffer} from 'node:buffer';
+import {Agent as HttpAgent} from 'node:http';
+import test from 'ava';
 import nock from 'nock';
 import getStream from 'get-stream';
 import FormData from 'form-data';
 import sinon from 'sinon';
 import delay from 'delay';
-import {Handler} from 'express';
+import type {Handler} from 'express';
 import Responselike from 'responselike';
-import got, {RequestError, HTTPError, Response, OptionsInit} from '../source/index.js';
+import type {Constructor} from 'type-fest';
+import got, {
+	RequestError,
+	HTTPError,
+	type Response,
+	type OptionsInit,
+} from '../source/index.js';
 import withServer from './helpers/with-server.js';
 
 const errorString = 'oops';
@@ -44,7 +49,7 @@ const redirectEndpoint: Handler = (_request, response) => {
 	response.end();
 };
 
-const createAgentSpy = <T extends HttpAgent>(AgentClass: Constructor): {agent: T; spy: sinon.SinonSpy} => {
+const createAgentSpy = <T extends HttpAgent>(AgentClass: Constructor<any>): {agent: T; spy: sinon.SinonSpy} => {
 	const agent: T = new AgentClass({keepAlive: true});
 	// eslint-disable-next-line import/no-named-as-default-member
 	const spy = sinon.spy(agent, 'addRequest' as any);
@@ -253,7 +258,7 @@ test('catches afterResponse promise rejections', withServer, async (t, server, g
 
 test('catches beforeError errors', async t => {
 	await t.throwsAsync(got('https://example.com', {
-		request: () => {
+		request() {
 			throw new Error('No way');
 		},
 		hooks: {
@@ -368,12 +373,14 @@ test('returning HTTP response from a beforeRequest hook', withServer, async (t, 
 	const {statusCode, headers, body} = await got({
 		hooks: {
 			beforeRequest: [
-				() => new Responselike(
-					200,
-					{foo: 'bar'},
-					Buffer.from('Hi!'),
-					'',
-				),
+				() => new Responselike({
+					statusCode: 200,
+					headers: {
+						foo: 'bar',
+					},
+					body: Buffer.from('Hi!'),
+					url: '',
+				}),
 			],
 		},
 	});
@@ -841,7 +848,7 @@ test('beforeError allows modifications', async t => {
 	const errorString2 = 'foobar';
 
 	await t.throwsAsync(got('https://example.com', {
-		request: () => {
+		request() {
 			throw error;
 		},
 		hooks: {
@@ -1048,7 +1055,7 @@ test('beforeRequest hook respect `url` option', withServer, async (t, server, go
 		hooks: {
 			beforeRequest: [
 				options => {
-					options.url = new URL(server.url + '/changed');
+					options.url = new URL(`${server.url}/changed`);
 				},
 			],
 		},
@@ -1333,7 +1340,7 @@ test('can retry without an agent', withServer, async (t, server, got) => {
 		}
 	}
 
-	const {response} = await t.throwsAsync<HTTPError>(got({
+	const {response} = (await t.throwsAsync<HTTPError>(got({
 		agent: {
 			http: new MyAgent(),
 		},
@@ -1347,7 +1354,7 @@ test('can retry without an agent', withServer, async (t, server, got) => {
 		retry: {
 			calculateDelay: ({computedValue}) => computedValue ? 1 : 0,
 		},
-	}));
+	})))!;
 
 	t.is(response.retryCount, 2);
 	t.is(counter, 1);
@@ -1365,4 +1372,27 @@ test('does not throw on empty body when running afterResponse hooks', withServer
 			],
 		},
 	}));
+});
+
+test('does not call beforeError hooks on falsy throwHttpErrors', withServer, async (t, server, got) => {
+	server.get('/', (_request, response) => {
+		response.statusCode = 404;
+		response.end();
+	});
+
+	let called = false;
+
+	await got('', {
+		throwHttpErrors: false,
+		hooks: {
+			beforeError: [
+				error => {
+					called = true;
+					return error;
+				},
+			],
+		},
+	});
+
+	t.false(called);
 });

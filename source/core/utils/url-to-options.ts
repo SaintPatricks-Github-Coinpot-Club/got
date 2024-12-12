@@ -1,20 +1,20 @@
-import {URL, UrlWithStringQuery} from 'url';
+import type {UrlWithStringQuery} from 'node:url';
 import is from '@sindresorhus/is';
 
 // TODO: Deprecate legacy URL at some point
 
-export interface LegacyUrlOptions {
+export type LegacyUrlOptions = {
 	protocol: string;
 	hostname: string;
 	host: string;
-	hash: string | null;
-	search: string | null;
+	hash: string | null; // eslint-disable-line @typescript-eslint/ban-types
+	search: string | null; // eslint-disable-line @typescript-eslint/ban-types
 	pathname: string;
 	href: string;
 	path: string;
 	port?: number;
 	auth?: string;
-}
+};
 
 export default function urlToOptions(url: URL | UrlWithStringQuery): LegacyUrlOptions {
 	// Cast to URL

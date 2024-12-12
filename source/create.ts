@@ -1,7 +1,7 @@
-import {URL} from 'url';
+import {setTimeout as delay} from 'node:timers/promises';
 import is, {assert} from '@sindresorhus/is';
 import asPromise from './as-promise/index.js';
-import {
+import type {
 	GotReturn,
 	ExtendOptions,
 	Got,
@@ -14,16 +14,11 @@ import {
 	StreamOptions,
 } from './types.js';
 import Request from './core/index.js';
-import {Response} from './core/response.js';
-import Options, {OptionsInit} from './core/options.js';
+import type {Response} from './core/response.js';
+import Options, {type OptionsInit} from './core/options.js';
 import type {CancelableRequest} from './as-promise/types.js';
 
-// The `delay` package weighs 10KB (!)
-const delay = async (ms: number) => new Promise(resolve => {
-	setTimeout(resolve, ms);
-});
-
-const isGotInstance = (value: Got | ExtendOptions): value is Got => is.function_(value);
+const isGotInstance = (value: Got | ExtendOptions): value is Got => is.function(value);
 
 const aliases: readonly HTTPAlias[] = [
 	'get',
@@ -55,16 +50,14 @@ const create = (defaults: InstanceDefaults): Got => {
 		const lastHandler = (normalized: Options): GotReturn => {
 			// Note: `options` is `undefined` when `new Options(...)` fails
 			request.options = normalized;
-			request._noPipe = !normalized.isStream;
+			request._noPipe = !normalized?.isStream;
 			void request.flush();
 
-			if (normalized.isStream) {
+			if (normalized?.isStream) {
 				return request;
 			}
 
-			if (!promise) {
-				promise = asPromise(request);
-			}
+			promise ||= asPromise(request);
 
 			return promise;
 		};
@@ -75,10 +68,8 @@ const create = (defaults: InstanceDefaults): Got => {
 
 			const result = handler(newOptions, iterateHandlers) as GotReturn;
 
-			if (is.promise(result) && !request.options.isStream) {
-				if (!promise) {
-					promise = asPromise(request);
-				}
+			if (is.promise(result) && !request.options?.isStream) {
+				promise ||= asPromise(request);
 
 				if (result !== promise) {
 					const descriptors = Object.getOwnPropertyDescriptors(promise);
@@ -139,10 +130,10 @@ const create = (defaults: InstanceDefaults): Got => {
 
 		const {pagination} = normalizedOptions;
 
-		assert.function_(pagination.transform);
-		assert.function_(pagination.shouldContinue);
-		assert.function_(pagination.filter);
-		assert.function_(pagination.paginate);
+		assert.function(pagination.transform);
+		assert.function(pagination.shouldContinue);
+		assert.function(pagination.filter);
+		assert.function(pagination.paginate);
 		assert.number(pagination.countLimit);
 		assert.number(pagination.requestLimit);
 		assert.number(pagination.backoff);

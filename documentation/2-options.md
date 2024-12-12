@@ -7,7 +7,7 @@ Source code: [`source/core/options.ts`](../source/core/options.ts)
 Like `fetch` stores the options in a `Request` instance, Got does so in `Options`.\
 It is made of getters and setters that provide fast option normalization and validation.
 
-**By default, Got will retry on failure. To disable this option, set [`options.retry`](7-retry.md) to `0`.**
+**By default, Got will retry on failure. To disable this option, set [`options.retry`](7-retry.md) to `{limit: 0}`.**
 
 #### Merge behavior explained
 
@@ -32,7 +32,7 @@ options.headers.foo = 'bar';
 
 // Note that `Options` stores normalized options, therefore it needs to be passed as the third argument.
 const {headers} = await got('anything', undefined, options).json();
-console.log(headers.Foo);
+console.log(headers.foo);
 //=> 'bar'
 ```
 
@@ -52,7 +52,7 @@ options.headers.foo = 'bar';
 
 // Note that `options` is a plain object, therefore it needs to be passed as the second argument.
 const {headers} = await got('anything', options).json();
-console.log(headers.Foo);
+console.log(headers.foo);
 //=> 'bar'
 ```
 
@@ -209,6 +209,26 @@ await got('https://httpbin.org/anything');
 #### **Note:**
 > - If you're passing an absolute URL as `url`, you need to set `prefixUrl` to an empty string.
 
+### `signal`
+
+**Type: [`AbortSignal`](https://developer.mozilla.org/en-US/docs/Web/API/AbortSignal)**
+
+You can abort the `request` using [`AbortController`](https://developer.mozilla.org/en-US/docs/Web/API/AbortController).
+
+```js
+import got from 'got';
+
+const abortController = new AbortController();
+
+const request = got('https://httpbin.org/anything', {
+	signal: abortController.signal
+});
+
+setTimeout(() => {
+	abortController.abort();
+}, 100);
+```
+
 ### `method`
 
 **Type: `string`**\
@@ -220,7 +240,9 @@ The most common methods are: `GET`, `HEAD`, `POST`, `PUT`, `DELETE`.
 ```js
 import got from 'got';
 
-const {method} = await got.post('https://httpbin.org/anything').json();
+const {method} = await got('https://httpbin.org/anything', {
+	method: 'POST'
+}).json();
 
 console.log(method);
 // => 'POST'
@@ -242,7 +264,7 @@ const {headers} = await got.post('https://httpbin.org/anything', {
 	}
 }).json();
 
-console.log(method);
+console.log(headers);
 // => {hello: 'world'}
 ```
 
@@ -341,7 +363,7 @@ console.log(data);
 
 ### `form`
 
-**Type: <code>object&lt;string, [Primitve](https://www.typescriptlang.org/docs/handbook/2/everyday-types.html)&gt;</code>**
+**Type: <code>object&lt;string, [Primitive](https://www.typescriptlang.org/docs/handbook/2/everyday-types.html)&gt;</code>**
 
 The form body is converted to a query string using `(new URLSearchParams(form)).toString()`.
 
@@ -443,7 +465,7 @@ Therefore this option has no effect when using HTTP/2.
 > - This option is only meant to interact with non-compliant servers when you have no other choice.
 
 #### **Note:**
-> - The [RFC 7321](https://tools.ietf.org/html/rfc7231#section-4.3.1) doesn't specify any particular behavior for the GET method having a payload, therefore it's considered an [**anti-pattern**](https://en.wikipedia.org/wiki/Anti-pattern).
+> - The [RFC 7231](https://tools.ietf.org/html/rfc7231#section-4.3.1) doesn't specify any particular behavior for the GET method having a payload, therefore it's considered an [**anti-pattern**](https://en.wikipedia.org/wiki/Anti-pattern).
 
 ### `timeout`
 
@@ -625,14 +647,12 @@ console.log(instance.defaults.options.context);
 Cookie support. Handles parsing and storing automatically.
 
 ```js
-import {promisify} from 'util';
 import got from 'got';
 import {CookieJar} from 'tough-cookie';
 
 const cookieJar = new CookieJar();
-const setCookie = promisify(cookieJar.setCookie.bind(cookieJar));
 
-await setCookie('foo=bar', 'https://example.com');
+await cookieJar.setCookie('foo=bar', 'https://example.com');
 await got('https://example.com', {cookieJar});
 ```
 
@@ -661,14 +681,16 @@ Only useful when the `cookieJar` option has been set.
 
 ### `followRedirect`
 
-**Type: `boolean`**\
+**Type: `boolean | (response: PlainResponse) => boolean`**\
 **Default: `true`**
 
-Defines if redirect responses should be followed automatically.
+Whether redirect responses should be followed automatically.
+
+Optionally, pass a function to dynamically decide based on the response object.
 
 #### **Note:**
-> - If a `303` is sent by the server in response to any request type (POST, DELETE, etc.), Got will automatically request the resource pointed to in the location header via GET.\
->  This is in accordance with the [specification](https://tools.ietf.org/html/rfc7231#section-6.4.4).
+> - If a `303` is sent by the server in response to any request type (POST, DELETE, etc.), Got will request the resource pointed to in the location header via GET.\
+>  This is in accordance with the [specification](https://tools.ietf.org/html/rfc7231#section-6.4.4). You can optionally turn on this behavior also for other redirect codes - see [`methodRewriting`](#methodrewriting).
 
 ```js
 import got from 'got';
@@ -912,9 +934,42 @@ Optionally overrides the value of [`--max-http-header-size`](https://nodejs.org/
 **Type: `boolean`**\
 **Default: `false`**
 
-By default, requests will not use [method rewriting](https://datatracker.ietf.org/doc/html/rfc7231#section-6.4).
+Specifies if the HTTP request method should be [rewritten as `GET`](https://tools.ietf.org/html/rfc7231#section-6.4) on redirects.
 
-For example, when sending a `POST` request and receiving a `302`, it will resend the body to the new location using the same HTTP method (`POST` in this case). To rewrite the request as `GET`, set this option to `true`.
+As the [specification](https://tools.ietf.org/html/rfc7231#section-6.4) prefers to rewrite the HTTP method only on `303` responses, this is Got's default behavior. Setting `methodRewriting` to `true` will also rewrite `301` and `302` responses, as allowed by the spec. This is the behavior followed by `curl` and browsers.
+
+**Note:**
+> - Got never performs method rewriting on `307` and `308` responses, as this is [explicitly prohibited by the specification](https://www.rfc-editor.org/rfc/rfc7231#section-6.4.7).
+
+### `enableUnixSockets`
+
+**Type: `boolean`**\
+**Default: `false`**
+
+When enabled, requests can also be sent via [UNIX Domain Sockets](https://serverfault.com/questions/124517/what-is-the-difference-between-unix-sockets-and-tcp-ip-sockets).
+
+> **Warning**
+> Make sure you do your own URL sanitizing if you accept untrusted user input for the URL.
+
+Use the following URL scheme: `PROTOCOL://unix:SOCKET:PATH`
+
+- `PROTOCOL` - `http` or `https`
+- `SOCKET` - Absolute path to a UNIX domain socket, for example: `/var/run/docker.sock`
+- `PATH` - Request path, for example: `/v2/keys`
+
+```js
+import got from 'got';
+
+await got('http://unix:/var/run/docker.sock:/containers/json', {enableUnixSockets: true});
+
+// Or without protocol (HTTP by default)
+await got('unix:/var/run/docker.sock:/containers/json', {enableUnixSockets: true});
+
+// Enable Unix sockets for the whole instance.
+const gotWithUnixSockets = got.extend({enableUnixSockets: true});
+
+await gotWithUnixSockets('http://unix:/var/run/docker.sock:/containers/json');
+```
 
 ## Methods
 

@@ -7,6 +7,8 @@ Source code: [`source/core/timed-out.ts`](../source/core/timed-out.ts)
 It is a good practice to set a timeout to prevent hanging requests.\
 By default, there is no timeout set.
 
+Note: The [`retry` configuration](7-retry.md) also applies to timeouts.
+
 **All numbers refer to milliseconds.**
 
 ```js
@@ -96,9 +98,9 @@ This timeout applies only to HTTPS requests.
 **Type: `number`**
 
 Starts when the socket is connected.\
-Resets when new data are received.
+Resets when new data is transferred.
 
-It is the same as [`request.setTimeout(timeout)`](https://nodejs.org/api/http.html#http_request_settimeout_timeout_callback).
+It is the same as [`request.setTimeout(timeout)`](https://nodejs.org/api/http.html#http_request_settimeout_timeout_callback) which calls [`socket.setTimeout(timeout)`](https://nodejs.org/api/net.html#socketsettimeouttimeout-callback) after a socket is assigned to this request and is connected.
 
 #### `send`
 

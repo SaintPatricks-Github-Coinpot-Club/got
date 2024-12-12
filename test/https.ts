@@ -1,15 +1,16 @@
-import process from 'process';
-import tls, {DetailedPeerCertificate} from 'tls';
+import process from 'node:process';
+import tls, {type DetailedPeerCertificate} from 'node:tls';
 import test from 'ava';
-import pEvent from 'p-event';
+import {pEvent} from 'p-event';
 import pify from 'pify';
 import pem from 'pem';
 import got from '../source/index.js';
 import {withHttpsServer} from './helpers/with-server.js';
+import type {CreatePrivateKey, CreateCsr, CreateCertificate} from './types/pem.js';
 
-const createPrivateKey = pify(pem.createPrivateKey);
-const createCSR = pify(pem.createCSR);
-const createCertificate = pify(pem.createCertificate);
+const createPrivateKey = pify(pem.createPrivateKey as CreatePrivateKey);
+const createCsr = pify(pem.createCSR as CreateCsr);
+const createCertificate = pify(pem.createCertificate as CreateCertificate);
 const createPkcs12 = pify(pem.createPkcs12);
 
 test('https request without ca', withHttpsServer(), async (t, server, got) => {
@@ -80,7 +81,7 @@ test('https request with `checkServerIdentity` OK', withHttpsServer(), async (t,
 
 	const {body} = await got({
 		https: {
-			checkServerIdentity: (hostname: string, certificate: DetailedPeerCertificate) => {
+			checkServerIdentity(hostname: string, certificate: DetailedPeerCertificate) {
 				t.is(hostname, 'localhost');
 				t.is(certificate.subject.CN, 'localhost');
 				t.is(certificate.issuer.CN, 'authority');
@@ -98,7 +99,7 @@ test('https request with `checkServerIdentity` NOT OK', withHttpsServer(), async
 
 	const promise = got({
 		https: {
-			checkServerIdentity: (hostname: string, certificate: DetailedPeerCertificate) => {
+			checkServerIdentity(hostname: string, certificate: DetailedPeerCertificate) {
 				t.is(hostname, 'localhost');
 				t.is(certificate.subject.CN, 'localhost');
 				t.is(certificate.issuer.CN, 'authority');
@@ -118,8 +119,8 @@ test('https request with `checkServerIdentity` NOT OK', withHttpsServer(), async
 
 // The built-in `openssl` on macOS does not support negative days.
 {
-	const testFn = process.platform === 'darwin' ? test.skip : test;
-	testFn('https request with expired certificate', withHttpsServer({days: -1}), async (t, _server, got) => {
+	const testFunction = process.platform === 'darwin' ? test.skip : test;
+	testFunction('https request with expired certificate', withHttpsServer({days: -1}), async (t, _server, got) => {
 		await t.throwsAsync(
 			got({}),
 			{
@@ -152,10 +153,9 @@ test('http2', async t => {
 		t.is(typeof body, 'string');
 
 		t.pass();
-	} catch (error) {
+	} catch (error: any) {
 		if (error.message.includes('install Node.js')) {
 			t.pass();
-
 			return;
 		}
 
@@ -206,10 +206,10 @@ test('client certificate', withHttpsServer(), async (t, server, got) => {
 		});
 	});
 
-	const clientCSRResult = await createCSR({commonName: 'client'});
+	const clientCsrResult = await createCsr({commonName: 'client'});
 	const clientResult = await createCertificate({
-		csr: clientCSRResult.csr,
-		clientKey: clientCSRResult.clientKey,
+		csr: clientCsrResult.csr,
+		clientKey: clientCsrResult.clientKey,
 		serviceKey: (server as any).caKey,
 		serviceCertificate: (server as any).caCert,
 	});
@@ -246,10 +246,10 @@ test('invalid client certificate (self-signed)', withHttpsServer(), async (t, se
 		});
 	});
 
-	const clientCSRResult = await createCSR({commonName: 'other-client'});
+	const clientCsrResult = await createCsr({commonName: 'other-client'});
 	const clientResult = await createCertificate({
-		csr: clientCSRResult.csr,
-		clientKey: clientCSRResult.clientKey,
+		csr: clientCsrResult.csr,
+		clientKey: clientCsrResult.clientKey,
 		selfSigned: true,
 	});
 	// eslint-disable-next-line prefer-destructuring
@@ -278,19 +278,19 @@ test('invalid client certificate (other CA)', withHttpsServer(), async (t, serve
 		});
 	});
 
-	const caCSRResult = await createCSR({commonName: 'other-authority'});
+	const caCsrResult = await createCsr({commonName: 'other-authority'});
 	const caResult = await createCertificate({
-		csr: caCSRResult.csr,
-		clientKey: caCSRResult.clientKey,
+		csr: caCsrResult.csr,
+		clientKey: caCsrResult.clientKey,
 		selfSigned: true,
 	});
 	const caKey = caResult.clientKey;
 	const caCert = caResult.certificate;
 
-	const clientCSRResult = await createCSR({commonName: 'other-client'});
+	const clientCsrResult = await createCsr({commonName: 'other-client'});
 	const clientResult = await createCertificate({
-		csr: clientCSRResult.csr,
-		clientKey: clientCSRResult.clientKey,
+		csr: clientCsrResult.csr,
+		clientKey: clientCsrResult.clientKey,
 		serviceKey: caKey,
 		serviceCertificate: caCert,
 	});
@@ -337,15 +337,15 @@ test('key passphrase', withHttpsServer(), async (t, server, got) => {
 		cipher: 'aes256',
 		password: 'randomPassword',
 	});
-	const clientCSRResult = await createCSR({
+	const clientCsrResult = await createCsr({
 		// eslint-disable-next-line object-shorthand
 		clientKey: clientKey,
 		clientKeyPassword: 'randomPassword',
 		commonName: 'client',
 	});
 	const clientResult = await createCertificate({
-		csr: clientCSRResult.csr,
-		clientKey: clientCSRResult.clientKey,
+		csr: clientCsrResult.csr,
+		clientKey: clientCsrResult.clientKey,
 		clientKeyPassword: 'randomPassword',
 		serviceKey: (server as any).caKey,
 		serviceCertificate: (server as any).caCert,
@@ -392,15 +392,15 @@ test('invalid key passphrase', withHttpsServer(), async (t, server, got) => {
 		cipher: 'aes256',
 		password: 'randomPassword',
 	});
-	const clientCSRResult = await createCSR({
+	const clientCsrResult = await createCsr({
 		// eslint-disable-next-line object-shorthand
 		clientKey: clientKey,
 		clientKeyPassword: 'randomPassword',
 		commonName: 'client',
 	});
 	const clientResult = await createCertificate({
-		csr: clientCSRResult.csr,
-		clientKey: clientCSRResult.clientKey,
+		csr: clientCsrResult.csr,
+		clientKey: clientCsrResult.clientKey,
 		clientKeyPassword: 'randomPassword',
 		serviceKey: (server as any).caKey,
 		serviceCertificate: (server as any).caCert,
@@ -415,12 +415,13 @@ test('invalid key passphrase', withHttpsServer(), async (t, server, got) => {
 		},
 	});
 
-	await t.throwsAsync(request, {
-		code: 'ERR_OSSL_EVP_BAD_DECRYPT',
-	});
+	const {code}: NodeJS.ErrnoException = (await t.throwsAsync(request))!;
+	t.true(code === 'ERR_OSSL_BAD_DECRYPT' || code === 'ERR_OSSL_EVP_BAD_DECRYPT', code);
 });
 
-test('client certificate PFX', withHttpsServer(), async (t, server, got) => {
+// TODO: RC2 is not supported on Node.js 17
+// eslint-disable-next-line ava/no-skip-test
+test.skip('client certificate PFX', withHttpsServer(), async (t, server, got) => {
 	server.get('/', (request, response) => {
 		const peerCertificate = (request.socket as any).getPeerCertificate(true);
 		peerCertificate.issuerCertificate = undefined; // Circular structure
@@ -431,10 +432,10 @@ test('client certificate PFX', withHttpsServer(), async (t, server, got) => {
 		});
 	});
 
-	const clientCSRResult = await createCSR({commonName: 'client'});
+	const clientCsrResult = await createCsr({commonName: 'client'});
 	const clientResult = await createCertificate({
-		csr: clientCSRResult.csr,
-		clientKey: clientCSRResult.clientKey,
+		csr: clientCsrResult.csr,
+		clientKey: clientCsrResult.clientKey,
 		serviceKey: (server as any).caKey,
 		serviceCertificate: (server as any).caCert,
 	});
@@ -462,9 +463,9 @@ test('client certificate PFX', withHttpsServer(), async (t, server, got) => {
 	t.is(response.peerCertificate.issuer.CN, 'authority');
 });
 
-const ciphers = tls.getCiphers().map(cipher => cipher.toUpperCase());
+const ciphers = tls.getCiphers().map(cipher => cipher.toUpperCase()).filter(cipher => cipher.startsWith('TLS_')).slice(0, 3);
 
-test('https request with `ciphers` option', withHttpsServer({ciphers: `${ciphers[0]!}:${ciphers[1]!}:${ciphers[2]!}`}), async (t, server, got) => {
+test('https request with `ciphers` option', withHttpsServer({ciphers: ciphers.join(':')}), async (t, server, got) => {
 	server.get('/', (request, response) => {
 		response.json({
 			cipher: (request.socket as any).getCipher().name,
@@ -477,7 +478,7 @@ test('https request with `ciphers` option', withHttpsServer({ciphers: `${ciphers
 		},
 	}).json<{cipher: string}>();
 
-	t.is(response.cipher, ciphers[0]);
+	t.is(response.cipher, ciphers[0]!);
 });
 
 test('https request with `honorCipherOrder` option', withHttpsServer({ciphers: `${ciphers[0]!}:${ciphers[1]!}`}), async (t, server, got) => {
@@ -494,7 +495,7 @@ test('https request with `honorCipherOrder` option', withHttpsServer({ciphers: `
 		},
 	}).json<{cipher: string}>();
 
-	t.is(response.cipher, ciphers[0]);
+	t.is(response.cipher, ciphers[0]!);
 });
 
 test('https request with `minVersion` option', withHttpsServer({maxVersion: 'TLSv1.2'}), async (t, server, got) => {

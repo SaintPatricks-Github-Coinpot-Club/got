@@ -1,12 +1,10 @@
-// @ts-expect-error TypeScript incorrectly thinks this is moot
-import type {Buffer} from 'buffer';
-import type {URL} from 'url';
+import type {Buffer} from 'node:buffer';
 import type {IncomingMessageWithTimings, Timings} from '@szmarczak/http-timer';
 import {RequestError} from './errors.js';
 import type {ParseJsonFunction, ResponseType} from './options.js';
 import type Request from './index.js';
 
-export interface PlainResponse extends IncomingMessageWithTimings {
+export type PlainResponse = {
 	/**
 	The original request URL.
 	*/
@@ -27,7 +25,7 @@ export interface PlainResponse extends IncomingMessageWithTimings {
 	/**
 	The remote IP address.
 
-	This is hopefully a temporary limitation, see [lukechilds/cacheable-request#86](https://github.com/lukechilds/cacheable-request/issues/86).
+	This is hopefully a temporary limitation, see [lukechilds/cacheable-request#86](https://web.archive.org/web/20220804165050/https://github.com/jaredwray/cacheable-request/issues/86).
 
 	__Note__: Not available when the response is cached.
 	*/
@@ -92,10 +90,17 @@ export interface PlainResponse extends IncomingMessageWithTimings {
 	The result of the request.
 	*/
 	body?: unknown;
-}
+
+	/**
+	Whether the response was successful.
+
+	__Note__: Got throws automatically when `response.ok` is `false` and `throwHttpErrors` is `true`.
+	*/
+	ok: boolean;
+} & IncomingMessageWithTimings;
 
 // For Promise support
-export interface Response<T = unknown> extends PlainResponse {
+export type Response<T = unknown> = {
 	/**
 	The result of the request.
 	*/
@@ -105,11 +110,13 @@ export interface Response<T = unknown> extends PlainResponse {
 	The raw result of the request.
 	*/
 	rawBody: Buffer;
-}
+} & PlainResponse;
 
 export const isResponseOk = (response: PlainResponse): boolean => {
 	const {statusCode} = response;
-	const limitStatusCode = response.request.options.followRedirect ? 299 : 399;
+	const {followRedirect} = response.request.options;
+	const shouldFollow = typeof followRedirect === 'function' ? followRedirect(response) : followRedirect;
+	const limitStatusCode = shouldFollow ? 299 : 399;
 
 	return (statusCode >= 200 && statusCode <= limitStatusCode) || statusCode === 304;
 };
@@ -139,18 +146,18 @@ export const parseBody = (response: Response, responseType: ResponseType, parseJ
 		}
 
 		if (responseType === 'json') {
-			return rawBody.length === 0 ? '' : parseJson(rawBody.toString());
+			return rawBody.length === 0 ? '' : parseJson(rawBody.toString(encoding));
 		}
 
 		if (responseType === 'buffer') {
 			return rawBody;
 		}
-
-		throw new ParseError({
-			message: `Unknown body type '${responseType as string}'`,
-			name: 'Error',
-		}, response);
 	} catch (error) {
-		throw new ParseError(error, response);
+		throw new ParseError(error as Error, response);
 	}
+
+	throw new ParseError({
+		message: `Unknown body type '${responseType as string}'`,
+		name: 'Error',
+	}, response);
 };

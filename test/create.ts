@@ -1,16 +1,20 @@
-import {Agent as HttpAgent, IncomingMessage, request as httpRequest, RequestOptions} from 'http';
-import {URL} from 'url';
+import {
+	Agent as HttpAgent,
+	request as httpRequest,
+	type IncomingMessage,
+	type RequestOptions,
+} from 'node:http';
 import test from 'ava';
 import is from '@sindresorhus/is';
-import {Handler} from 'express';
+import type {Handler} from 'express';
 import delay from 'delay';
 import got, {
-	BeforeRequestHook,
-	Headers,
-	Hooks,
 	Options,
-	OptionsInit,
-	RequestFunction,
+	type BeforeRequestHook,
+	type Headers,
+	type Hooks,
+	type OptionsInit,
+	type RequestFunction,
 } from '../source/index.js';
 import withServer from './helpers/with-server.js';
 
@@ -192,14 +196,14 @@ test('ability to pass a custom request method', withServer, async (t, server, go
 
 	let isCalled = false;
 
-	const request: RequestFunction = (...args: [
+	const request: RequestFunction = (...arguments_: [
 		string | URL | RequestOptions,
 		(RequestOptions | ((response: IncomingMessage) => void))?,
 		((response: IncomingMessage) => void)?,
 	]) => {
 		isCalled = true;
 		// @ts-expect-error Overload error
-		return httpRequest(...args);
+		return httpRequest(...arguments_);
 	};
 
 	const instance = got.extend({request});
@@ -213,17 +217,17 @@ test('does not include the `request` option in normalized `http` options', withS
 
 	let isCalled = false;
 
-	const request: RequestFunction = (...args: [
+	const request: RequestFunction = (...arguments_: [
 		string | URL | RequestOptions,
 		(RequestOptions | ((response: IncomingMessage) => void))?,
 		((response: IncomingMessage) => void)?,
 	]) => {
 		isCalled = true;
 
-		t.false(Reflect.has(args[0] as RequestOptions, 'request'));
+		t.false(Reflect.has(arguments_[0] as RequestOptions, 'request'));
 
 		// @ts-expect-error Overload error
-		return httpRequest(...args);
+		return httpRequest(...arguments_);
 	};
 
 	const instance = got.extend({request});
@@ -325,7 +329,7 @@ test('async handlers', withServer, async (t, server, got) => {
 	});
 
 	const promise = instance('');
-	t.true(is.function_(promise.cancel));
+	t.true(is.function(promise.cancel));
 	// @ts-expect-error Manual tests
 	t.true((await promise).modified);
 });
@@ -341,7 +345,10 @@ test('async handlers can throw', async t => {
 		],
 	});
 
-	await t.throwsAsync(instance('https://example.com'), {message});
+	await t.throwsAsync(instance('https://example.com'), {
+		instanceOf: Error,
+		message,
+	});
 });
 
 test('setting dnsCache to true points to global cache', t => {
@@ -372,7 +379,7 @@ test('waits for handlers to finish', withServer, async (t, server, got) => {
 		],
 	});
 
-	const {foo} = await instance('').json();
+	const {foo} = await instance('').json<{foo: 'bar'}>();
 	t.is(foo, 'bar');
 });
 

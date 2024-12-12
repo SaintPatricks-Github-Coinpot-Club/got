@@ -1,15 +1,16 @@
-import process from 'process';
-import {EventEmitter} from 'events';
-import stream, {Readable as ReadableStream} from 'stream';
+import process from 'node:process';
+import {EventEmitter} from 'node:events';
+import {Readable as ReadableStream} from 'node:stream';
+import {pipeline as streamPipeline} from 'node:stream/promises';
 import test from 'ava';
 import delay from 'delay';
-import pEvent from 'p-event';
+import {pEvent} from 'p-event';
 import getStream from 'get-stream';
-import {Handler} from 'express';
-import got, {CancelError, TimeoutError} from '../source/index.js';
+import type {Handler} from 'express';
+import got, {CancelError, TimeoutError, RequestError} from '../source/index.js';
 import slowDataStream from './helpers/slow-data-stream.js';
-import {GlobalClock} from './helpers/types.js';
-import {ExtendedHttpTestServer} from './helpers/create-http-test-server.js';
+import type {GlobalClock} from './helpers/types.js';
+import type {ExtendedHttpTestServer} from './helpers/create-http-test-server.js';
 import withServer, {withServerAndFakeTimers} from './helpers/with-server.js';
 
 const prepareServer = (server: ExtendedHttpTestServer, clock: GlobalClock): {emitter: EventEmitter; promise: Promise<unknown>} => {
@@ -54,13 +55,16 @@ const downloadHandler = (clock?: GlobalClock): Handler => (_request, response) =
 
 	response.flushHeaders();
 
-	stream.pipeline(
-		slowDataStream(clock),
-		response,
-		() => {
-			response.end();
-		},
-	);
+	(async () => {
+		try {
+			await streamPipeline(
+				slowDataStream(clock),
+				response,
+			);
+		} catch {}
+
+		response.end();
+	})();
 };
 
 test.serial('does not retry after cancelation', withServerAndFakeTimers, async (t, server, got, clock) => {
@@ -68,7 +72,7 @@ test.serial('does not retry after cancelation', withServerAndFakeTimers, async (
 
 	const gotPromise = got('redirect', {
 		retry: {
-			calculateDelay: () => {
+			calculateDelay() {
 				t.fail('Makes a new try after cancelation');
 				return 0;
 			},
@@ -94,7 +98,7 @@ test.serial('cleans up request timeouts', withServer, async (t, server, got) => 
 			request: 10,
 		},
 		retry: {
-			calculateDelay: ({computedValue}) => {
+			calculateDelay({computedValue}) {
 				process.nextTick(() => {
 					gotPromise.cancel();
 				});
@@ -180,14 +184,17 @@ test.serial('cancel immediately', withServerAndFakeTimers, async (t, server, got
 	const gotPromise = got('abort');
 	gotPromise.cancel();
 
-	await t.throwsAsync(gotPromise);
+	await t.throwsAsync(gotPromise, {
+		instanceOf: CancelError,
+		code: 'ERR_CANCELED',
+	});
 	await t.notThrowsAsync(promise, 'Request finished instead of aborting.');
 });
 
 test('recover from cancelation using cancelable promise attribute', async t => {
 	// Canceled before connection started
 	const p = got('http://example.com');
-	const recover = p.catch((error: Error) => { // eslint-disable-line promise/prefer-await-to-then
+	const recover = p.catch((error: Error) => {
 		if (p.isCanceled) {
 			return;
 		}
@@ -203,7 +210,7 @@ test('recover from cancelation using cancelable promise attribute', async t => {
 test('recover from cancellation using error instance', async t => {
 	// Canceled before connection started
 	const p = got('http://example.com');
-	const recover = p.catch((error: Error) => { // eslint-disable-line promise/prefer-await-to-then
+	const recover = p.catch((error: Error) => {
 		if (error instanceof CancelError) {
 			return;
 		}
@@ -230,9 +237,8 @@ test.serial('throws on incomplete (canceled) response - promise', withServerAndF
 	);
 });
 
-// TODO: Use `fakeTimers` here
-test.serial('throws on incomplete (canceled) response - promise #2', withServer, async (t, server, got) => {
-	server.get('/', downloadHandler());
+test.serial('throws on incomplete (canceled) response - promise #2', withServerAndFakeTimers, async (t, server, got, clock) => {
+	server.get('/', downloadHandler(clock));
 
 	const promise = got('');
 
@@ -256,7 +262,10 @@ test.serial('throws on incomplete (canceled) response - stream', withServerAndFa
 		stream.destroy(new Error(errorString));
 	});
 
-	await t.throwsAsync(getStream(stream), {message: errorString});
+	await t.throwsAsync(getStream(stream), {
+		instanceOf: RequestError,
+		message: errorString,
+	});
 });
 
 test('throws when canceling cached request', withServer, async (t, server, got) => {

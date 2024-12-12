@@ -1,9 +1,9 @@
-import {Buffer} from 'buffer';
-import {promisify} from 'util';
-import zlib from 'zlib';
+import {Buffer} from 'node:buffer';
+import {promisify} from 'node:util';
+import zlib from 'node:zlib';
 import test from 'ava';
 import getStream from 'get-stream';
-import {HTTPError, ReadError} from '../source/index.js';
+import {ReadError, type HTTPError} from '../source/index.js';
 import withServer from './helpers/with-server.js';
 
 const testContent = 'Compressible response content.\n';
@@ -32,7 +32,7 @@ test('decompress content on error', withServer, async (t, server, got) => {
 
 	const error = await t.throwsAsync<HTTPError>(got(''));
 
-	t.is(error.response.body, testContent);
+	t.is(error?.response.body, testContent);
 });
 
 test('decompress content - stream', withServer, async (t, server, got) => {

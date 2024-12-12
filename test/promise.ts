@@ -1,8 +1,8 @@
-import {Buffer} from 'buffer';
-import {ReadStream} from 'fs';
-import {ClientRequest, IncomingMessage} from 'http';
+import {Buffer} from 'node:buffer';
+import {ReadStream} from 'node:fs';
+import {ClientRequest, IncomingMessage} from 'node:http';
 import test from 'ava';
-import {Response, CancelError} from '../source/index.js';
+import {type Response, CancelError} from '../source/index.js';
 import withServer from './helpers/with-server.js';
 
 test('emits request event as promise', withServer, async (t, server, got) => {
@@ -26,7 +26,7 @@ test('emits response event as promise', withServer, async (t, server, got) => {
 		t.true(response instanceof IncomingMessage);
 		t.false(response.readable);
 		t.is(response.statusCode, 200);
-		t.is(response.ip, '127.0.0.1');
+		t.true(response.ip === '127.0.0.1' || response.ip === '::1');
 	});
 });
 
@@ -64,9 +64,9 @@ test('promise.json() can be called before a file stream body is open', withServe
 	// @ts-expect-error @types/node has wrong types.
 	const body = new ReadStream('', {
 		fs: {
-			open: () => {},
-			read: () => {},
-			close: () => {},
+			open() {},
+			read() {},
+			close() {},
 		},
 	});
 

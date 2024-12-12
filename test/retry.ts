@@ -1,14 +1,15 @@
-import process from 'process';
-import {EventEmitter} from 'events';
-import {PassThrough as PassThroughStream} from 'stream';
-import {Socket} from 'net';
-import http from 'http';
+import process from 'node:process';
+import {EventEmitter} from 'node:events';
+import {PassThrough as PassThroughStream} from 'node:stream';
+import type {Socket} from 'node:net';
+import http from 'node:http';
 import test from 'ava';
 import is from '@sindresorhus/is';
-import {Handler} from 'express';
+import type {Handler} from 'express';
 import getStream from 'get-stream';
-import pEvent from 'p-event';
+import {pEvent} from 'p-event';
 import got, {HTTPError, TimeoutError} from '../source/index.js';
+import type Request from '../source/core/index.js';
 import withServer from './helpers/with-server.js';
 
 const retryAfterOn413 = 2;
@@ -45,14 +46,14 @@ test('works on timeout', withServer, async (t, server, got) => {
 		timeout: {
 			socket: socketTimeout,
 		},
-		request: (...args: [
+		request(...arguments_: [
 			string | URL | http.RequestOptions,
 			(http.RequestOptions | ((response: http.IncomingMessage) => void))?,
 			((response: http.IncomingMessage) => void)?,
-		]) => {
+		]) {
 			if (knocks === 1) {
 				// @ts-expect-error Overload error
-				return http.request(...args);
+				return http.request(...arguments_);
 			}
 
 			knocks++;
@@ -75,7 +76,7 @@ test('retry function gets iteration count', withServer, async (t, server, got) =
 
 	await got({
 		retry: {
-			calculateDelay: ({attemptCount}) => {
+			calculateDelay({attemptCount}) {
 				t.true(is.number(attemptCount));
 				return attemptCount < 2 ? 1 : 0;
 			},
@@ -87,7 +88,7 @@ test('setting to `0` disables retrying', async t => {
 	await t.throwsAsync(got('https://example.com', {
 		timeout: {socket: socketTimeout},
 		retry: {
-			calculateDelay: ({attemptCount}) => {
+			calculateDelay({attemptCount}) {
 				t.is(attemptCount, 1);
 				return 0;
 			},
@@ -109,7 +110,7 @@ test('custom retries', withServer, async (t, server, got) => {
 	const error = await t.throwsAsync<HTTPError>(got({
 		throwHttpErrors: true,
 		retry: {
-			calculateDelay: ({attemptCount}) => {
+			calculateDelay({attemptCount}) {
 				if (attemptCount === 1) {
 					hasTried = true;
 					return 1;
@@ -125,7 +126,7 @@ test('custom retries', withServer, async (t, server, got) => {
 			],
 		},
 	}));
-	t.is(error.response.statusCode, 500);
+	t.is(error?.response.statusCode, 500);
 	t.true(hasTried);
 });
 
@@ -139,7 +140,7 @@ test('custom retries async', withServer, async (t, server, got) => {
 	const error = await t.throwsAsync<HTTPError>(got({
 		throwHttpErrors: true,
 		retry: {
-			calculateDelay: async ({attemptCount}) => {
+			async calculateDelay({attemptCount}) {
 				await new Promise(resolve => {
 					setTimeout(resolve, 1000);
 				});
@@ -159,7 +160,7 @@ test('custom retries async', withServer, async (t, server, got) => {
 			],
 		},
 	}));
-	t.is(error.response.statusCode, 500);
+	t.is(error?.response.statusCode, 500);
 	t.true(hasTried);
 });
 
@@ -167,10 +168,12 @@ test('custom error codes', async t => {
 	const errorCode = 'OH_SNAP';
 
 	const error = await t.throwsAsync<Error & {code: typeof errorCode}>(got('https://example.com', {
-		request: () => {
+		request() {
 			const emitter = new EventEmitter() as http.ClientRequest;
 			emitter.abort = () => {};
+			// @ts-expect-error Imitating a stream
 			emitter.end = () => {};
+			// @ts-expect-error Imitating a stream
 			emitter.destroy = () => {};
 			// @ts-expect-error Imitating a stream
 			emitter.writable = true;
@@ -186,7 +189,7 @@ test('custom error codes', async t => {
 			return emitter;
 		},
 		retry: {
-			calculateDelay: ({error}) => {
+			calculateDelay({error}) {
 				t.is(error.code, errorCode);
 				return 0;
 			},
@@ -199,7 +202,7 @@ test('custom error codes', async t => {
 		},
 	}));
 
-	t.is(error.code, errorCode);
+	t.is(error?.code, errorCode);
 });
 
 test('respects 413 Retry-After', withServer, async (t, server, got) => {
@@ -311,7 +314,7 @@ test('doesn\'t retry on streams', withServer, async (t, server, got) => {
 			request: 1,
 		},
 		retry: {
-			calculateDelay: () => {
+			calculateDelay() {
 				t.fail('Retries on streams');
 			},
 		},
@@ -363,7 +366,7 @@ test('retry function can throw', withServer, async (t, server, got) => {
 	const error = 'Simple error';
 	await t.throwsAsync(got({
 		retry: {
-			calculateDelay: () => {
+			calculateDelay() {
 				throw new Error(error);
 			},
 		},
@@ -459,11 +462,10 @@ test('can retry a Got stream', withServer, async (t, server, got) => {
 	const responseStreamPromise = new Promise<PassThroughStream>((resolve, reject) => {
 		let writeStream: PassThroughStream;
 
-		const fn = (retryCount = 0) => {
-			const stream = got.stream('');
-			stream.retryCount = retryCount;
+		const function_ = (retryStream?: Request) => {
+			const stream = retryStream ?? got.stream('');
 
-			globalRetryCount = retryCount;
+			globalRetryCount = stream.retryCount;
 
 			if (writeStream) {
 				writeStream.destroy();
@@ -473,7 +475,9 @@ test('can retry a Got stream', withServer, async (t, server, got) => {
 
 			stream.pipe(writeStream);
 
-			stream.once('retry', fn);
+			stream.once('retry', (_retryCount, _error, createRetryStream) => {
+				function_(createRetryStream());
+			});
 
 			stream.once('error', reject);
 			stream.once('end', () => {
@@ -481,7 +485,7 @@ test('can retry a Got stream', withServer, async (t, server, got) => {
 			});
 		};
 
-		fn();
+		function_();
 	});
 
 	const responseStream = await responseStreamPromise;
@@ -500,14 +504,15 @@ test('throws when cannot retry a Got stream', withServer, async (t, server, got)
 	let globalRetryCount = 0;
 
 	const streamPromise = new Promise<PassThroughStream>((resolve, reject) => {
-		const fn = (retryCount = 0) => {
-			const stream = got.stream('');
-			stream.retryCount = retryCount;
+		const function_ = (retryStream?: Request) => {
+			const stream = retryStream ?? got.stream('');
 
-			globalRetryCount = retryCount;
+			globalRetryCount = stream.retryCount;
 
 			stream.resume();
-			stream.once('retry', fn);
+			stream.once('retry', (_retryCount, _error, createRetryStream) => {
+				function_(createRetryStream());
+			});
 
 			stream.once('data', () => {
 				stream.destroy(new Error('data event has been emitted'));
@@ -517,16 +522,32 @@ test('throws when cannot retry a Got stream', withServer, async (t, server, got)
 			stream.once('end', resolve);
 		};
 
-		fn();
+		function_();
 	});
 
 	const error = await t.throwsAsync<HTTPError>(streamPromise, {
 		instanceOf: HTTPError,
 	});
 
-	t.is(error.response.statusCode, 500);
-	t.is(error.response.body, 'not ok');
+	t.is(error?.response.statusCode, 500);
+	t.is(error?.response.body, 'not ok');
 	t.is(globalRetryCount, 2);
+});
+
+test('can attach only one retry listener to a stream', withServer, async (t, _server, got) => {
+	const stream = got.stream('');
+
+	t.notThrows(() => {
+		stream.on('retry', () => {});
+	});
+
+	t.throws(() => {
+		stream.on('retry', () => {});
+	}, {
+		message: 'A retry listener has been attached already.',
+	});
+
+	stream.destroy();
 });
 
 test('promise does not retry when body is a stream', withServer, async (t, server, got) => {
@@ -560,9 +581,9 @@ test('reuses request options on retry', withServer, async (t, server, got) => {
 		response.end(JSON.stringify(request.headers));
 	});
 
-	const {body: {accept}, retryCount} = await got('', {timeout: {request: 1000}, responseType: 'json'});
+	const {body, retryCount} = await got('', {timeout: {request: 1000}, responseType: 'json'});
 	t.is(retryCount, 1);
-	t.is(accept, 'application/json');
+	t.is((body as any).accept, 'application/json');
 });
 
 test('respects backoffLimit', withServer, async (t, server, got) => {

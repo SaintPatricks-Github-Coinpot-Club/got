@@ -1,6 +1,6 @@
-import http from 'http';
-import net from 'net';
-import express, {Express, NextFunction} from 'express';
+import http from 'node:http';
+import type net from 'node:net';
+import express, {type Express, type NextFunction} from 'express';
 import pify from 'pify';
 import bodyParser from 'body-parser';
 
@@ -8,13 +8,13 @@ export type HttpServerOptions = {
 	bodyParser?: NextFunction | false;
 };
 
-export interface ExtendedHttpTestServer extends Express {
+export type ExtendedHttpTestServer = {
 	http: http.Server;
 	url: string;
 	port: number;
 	hostname: string;
 	close: () => Promise<any>;
-}
+} & Express;
 
 const createHttpTestServer = async (options: HttpServerOptions = {}): Promise<ExtendedHttpTestServer> => {
 	const server = express() as ExtendedHttpTestServer;
@@ -25,7 +25,14 @@ const createHttpTestServer = async (options: HttpServerOptions = {}): Promise<Ex
 	if (options.bodyParser !== false) {
 		server.use(bodyParser.json({limit: '1mb', type: 'application/json', ...options.bodyParser}));
 		server.use(bodyParser.text({limit: '1mb', type: 'text/plain', ...options.bodyParser}));
-		server.use(bodyParser.urlencoded({limit: '1mb', type: 'application/x-www-form-urlencoded', extended: true, ...options.bodyParser}));
+
+		server.use(bodyParser.urlencoded({
+			limit: '1mb',
+			type: 'application/x-www-form-urlencoded',
+			extended: true,
+			...options.bodyParser,
+		}));
+
 		server.use(bodyParser.raw({limit: '1mb', type: 'application/octet-stream', ...options.bodyParser}));
 	}
 

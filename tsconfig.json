@@ -2,12 +2,12 @@
 	"extends": "@sindresorhus/tsconfig",
 	"compilerOptions": {
 		"outDir": "dist",
-		"target": "es2020", // Node.js 14
+		"target": "es2022", // Node.js 18
 		"lib": [
-			"es2020"
+			"es2022"
 		],
-		// TODO: Remove this at some point.
-		"noPropertyAccessFromIndexSignature": false
+		"noPropertyAccessFromIndexSignature": false,
+		"isolatedModules": true
 	},
 	"include": [
 		"source",

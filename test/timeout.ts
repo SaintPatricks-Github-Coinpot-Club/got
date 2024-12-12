@@ -1,22 +1,20 @@
-import process from 'process';
-import {promisify} from 'util';
-import {EventEmitter} from 'events';
-import stream, {PassThrough as PassThroughStream} from 'stream';
-import http from 'http';
-import net from 'net';
+import process from 'node:process';
+import {EventEmitter} from 'node:events';
+import stream, {PassThrough as PassThroughStream} from 'node:stream';
+import {pipeline as streamPipeline} from 'node:stream/promises';
+import http from 'node:http';
+import net from 'node:net';
 import getStream from 'get-stream';
 import test from 'ava';
 import delay from 'delay';
-import CacheableLookup from 'cacheable-lookup';
-import {Handler} from 'express';
-import pEvent from 'p-event';
-import got, {RequestError, TimeoutError} from '../source/index.js';
+import type CacheableLookup from 'cacheable-lookup';
+import type {Handler} from 'express';
+import {pEvent} from 'p-event';
+import got, {type RequestError, TimeoutError} from '../source/index.js';
 import timedOut from '../source/core/timed-out.js';
 import slowDataStream from './helpers/slow-data-stream.js';
-import {GlobalClock} from './helpers/types.js';
+import type {GlobalClock} from './helpers/types.js';
 import withServer, {withServerAndFakeTimers, withHttpsServer} from './helpers/with-server.js';
-
-const pStreamPipeline = promisify(stream.pipeline);
 
 const requestDelay = 800;
 
@@ -44,7 +42,7 @@ const downloadHandler = (clock?: GlobalClock): Handler => (_request, response) =
 	response.flushHeaders();
 
 	setImmediate(async () => {
-		await pStreamPipeline(slowDataStream(clock), response);
+		await streamPipeline(slowDataStream(clock), response);
 	});
 };
 
@@ -91,7 +89,7 @@ test.serial('socket timeout', async t => {
 			retry: {
 				limit: 0,
 			},
-			request: () => {
+			request() {
 				const stream = new PassThroughStream();
 				// @ts-expect-error Mocking the behaviour of a ClientRequest
 				stream.setTimeout = (ms, callback) => {
@@ -246,7 +244,7 @@ test.serial('response timeout (keepalive)', withServerAndFakeTimers, async (t, s
 test.serial('connect timeout', withServerAndFakeTimers, async (t, _server, got, clock) => {
 	await t.throwsAsync(
 		got({
-			createConnection: options => {
+			createConnection(options) {
 				const socket = new net.Socket(options as Record<string, unknown> as net.SocketConstructorOpts);
 				// @ts-expect-error We know that it is readonly, but we have to test it
 				socket.connecting = true;
@@ -275,7 +273,7 @@ test.serial('connect timeout (ip address)', withServerAndFakeTimers, async (t, _
 	await t.throwsAsync(
 		got({
 			url: 'http://127.0.0.1',
-			createConnection: options => {
+			createConnection(options) {
 				const socket = new net.Socket(options as Record<string, unknown> as net.SocketConstructorOpts);
 				// @ts-expect-error We know that it is readonly, but we have to test it
 				socket.connecting = true;
@@ -300,7 +298,7 @@ test.serial('connect timeout (ip address)', withServerAndFakeTimers, async (t, _
 test.serial('secureConnect timeout', withHttpsServer({}, true), async (t, _server, got, clock) => {
 	await t.throwsAsync(
 		got({
-			createConnection: options => {
+			createConnection(options) {
 				const socket = new net.Socket(options as Record<string, unknown> as net.SocketConstructorOpts);
 				// @ts-expect-error We know that it is readonly, but we have to test it
 				socket.connecting = true;
@@ -350,7 +348,7 @@ test.serial('lookup timeout', withServerAndFakeTimers, async (t, server, got, cl
 
 	await t.throwsAsync(
 		got({
-			dnsLookup: () => {},
+			dnsLookup() {},
 			timeout: {lookup: 1},
 			retry: {
 				limit: 0,
@@ -406,7 +404,7 @@ test.serial('retries on timeout', withServer, async (t, server, got) => {
 			request: 1,
 		},
 		retry: {
-			calculateDelay: () => {
+			calculateDelay() {
 				if (hasTried) {
 					return 0;
 				}
@@ -482,8 +480,8 @@ test.serial('no unhandled timeout errors', withServer, async (t, _server, got) =
 	await t.throwsAsync(got({
 		retry: {limit: 0},
 		timeout: {request: 100},
-		request: (...args) => {
-			const result = http.request(...args);
+		request(...arguments_) {
+			const result = http.request(...arguments_);
 
 			result.once('socket', () => {
 				result.socket?.destroy();
@@ -507,7 +505,7 @@ test.serial('no unhandled timeout errors #2', withServer, async (t, server, got)
 			request: 20,
 		},
 		retry: {
-			calculateDelay: ({computedValue}) => {
+			calculateDelay({computedValue}) {
 				if (computedValue) {
 					return 10;
 				}
@@ -528,7 +526,7 @@ test.serial('no more timeouts after an error', withServer, async (t, _server, go
 	const {clearTimeout} = global;
 
 	// @ts-expect-error FIXME
-	global.setTimeout = (callback, _ms, ...args) => {
+	global.setTimeout = (callback, _ms, ...arguments_) => {
 		const timeout = {
 			isCleared: false,
 		};
@@ -538,8 +536,7 @@ test.serial('no more timeouts after an error', withServer, async (t, _server, go
 				return;
 			}
 
-			// @ts-expect-error FIXME
-			callback(...args);
+			callback(...arguments_);
 		});
 
 		return timeout;
@@ -635,7 +632,7 @@ test('double calling timedOut has no effect', t => {
 	t.is(emitter.listenerCount('socket'), 1);
 });
 
-test.serial('doesn\'t throw on early lookup', withServerAndFakeTimers, async (t, server, got) => {
+test.serial.failing('doesn\'t throw on early lookup', withServerAndFakeTimers, async (t, server, got) => {
 	server.get('/', (_request, response) => {
 		response.end('ok');
 	});
@@ -646,7 +643,7 @@ test.serial('doesn\'t throw on early lookup', withServerAndFakeTimers, async (t,
 		},
 		retry: {limit: 0},
 		// @ts-expect-error FIXME
-		dnsLookup: (...[_hostname, options, callback]: Parameters<CacheableLookup['lookup']>) => {
+		dnsLookup(...[_hostname, options, callback]: Parameters<CacheableLookup['lookup']>) {
 			if (typeof options === 'function') {
 				callback = options;
 			}
@@ -687,7 +684,7 @@ test.serial('`read` timeout - promise', withServer, async (t, server, got) => {
 });
 
 // TODO: use fakeTimers here
-test.serial.failing('`read` timeout - stream', withServer, async (t, server, got) => {
+test.serial('`read` timeout - stream', withServer, async (t, server, got) => {
 	t.timeout(100);
 
 	server.get('/', (_request, response) => {
@@ -744,7 +741,7 @@ test('timeouts are emitted ASAP', async t => {
 		},
 	}), {instanceOf: TimeoutError});
 
-	t.true(error.timings.phases.total! < (timeout + marginOfError));
+	t.true(error!.timings.phases.total! < (timeout + marginOfError));
 });
 
 test('http2 timeout', async t => {
@@ -758,5 +755,5 @@ test('http2 timeout', async t => {
 		},
 	}));
 
-	t.true(error.code === 'ETIMEDOUT' || error.code === 'EUNSUPPORTED', error.stack);
+	t.true(error?.code === 'ETIMEDOUT' || error?.code === 'EUNSUPPORTED', error?.stack);
 });

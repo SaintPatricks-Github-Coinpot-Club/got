@@ -1,6 +1,6 @@
 import test from 'ava';
-import {Handler} from 'express';
-import got, {BeforeRequestHook, Got, Headers} from '../source/index.js';
+import type {Handler} from 'express';
+import got, {type BeforeRequestHook, type Got, type Headers} from '../source/index.js';
 import withServer from './helpers/with-server.js';
 
 const echoHeaders: Handler = (request, response) => {
@@ -79,20 +79,24 @@ test('merging two groups of merged instances', withServer, async (t, server) => 
 test('hooks are merged', t => {
 	const getBeforeRequestHooks = (instance: Got): BeforeRequestHook[] => instance.defaults.options.hooks.beforeRequest;
 
-	const instanceA = got.extend({hooks: {
-		beforeRequest: [
-			options => {
-				options.headers.dog = 'woof';
-			},
-		],
-	}});
-	const instanceB = got.extend({hooks: {
-		beforeRequest: [
-			options => {
-				options.headers.cat = 'meow';
-			},
-		],
-	}});
+	const instanceA = got.extend({
+		hooks: {
+			beforeRequest: [
+				options => {
+					options.headers.dog = 'woof';
+				},
+			],
+		},
+	});
+	const instanceB = got.extend({
+		hooks: {
+			beforeRequest: [
+				options => {
+					options.headers.cat = 'meow';
+				},
+			],
+		},
+	});
 
 	const merged = instanceA.extend(instanceB);
 	t.deepEqual(getBeforeRequestHooks(merged), [...getBeforeRequestHooks(instanceA), ...getBeforeRequestHooks(instanceB)]);
@@ -118,13 +122,17 @@ test('URL is not polluted', withServer, async (t, server, got) => {
 });
 
 test('merging instances with HTTPS options', t => {
-	const instanceA = got.extend({https: {
-		rejectUnauthorized: true,
-		certificate: 'FIRST',
-	}});
-	const instanceB = got.extend({https: {
-		certificate: 'SECOND',
-	}});
+	const instanceA = got.extend({
+		https: {
+			rejectUnauthorized: true,
+			certificate: 'FIRST',
+		},
+	});
+	const instanceB = got.extend({
+		https: {
+			certificate: 'SECOND',
+		},
+	});
 
 	const merged = instanceA.extend(instanceB);
 
@@ -133,13 +141,17 @@ test('merging instances with HTTPS options', t => {
 });
 
 test('merging instances with HTTPS options undefined', t => {
-	const instanceA = got.extend({https: {
-		rejectUnauthorized: true,
-		certificate: 'FIRST',
-	}});
-	const instanceB = got.extend({https: {
-		certificate: undefined,
-	}});
+	const instanceA = got.extend({
+		https: {
+			rejectUnauthorized: true,
+			certificate: 'FIRST',
+		},
+	});
+	const instanceB = got.extend({
+		https: {
+			certificate: undefined,
+		},
+	});
 
 	const merged = instanceA.extend(instanceB);
 

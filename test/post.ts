@@ -1,28 +1,31 @@
-import process from 'process';
-import {Buffer} from 'buffer';
-import {promisify} from 'util';
-import stream from 'stream';
-import fs from 'fs';
-import fsPromises from 'fs/promises';
-import path from 'path';
+import process from 'node:process';
+import {Buffer} from 'node:buffer';
+import stream from 'node:stream';
+import {pipeline as streamPipeline} from 'node:stream/promises';
+import fs from 'node:fs';
+import fsPromises from 'node:fs/promises';
+import path from 'node:path';
 import test from 'ava';
 import delay from 'delay';
-import pEvent from 'p-event';
-import {Handler} from 'express';
-import {parse, Body, BodyEntryPath, BodyEntryRawValue, isBodyFile} from 'then-busboy';
+import {pEvent} from 'p-event';
+import type {Handler} from 'express';
+import {
+	parse,
+	Body,
+	isBodyFile,
+	type BodyEntryPath,
+	type BodyEntryRawValue,
+} from 'then-busboy';
 import {FormData as FormDataNode, Blob, File} from 'formdata-node';
 import {fileFromPath} from 'formdata-node/file-from-path';
 import getStream from 'get-stream';
 import FormData from 'form-data';
-import toReadableStream from 'to-readable-stream';
 import got, {UploadError} from '../source/index.js';
 import withServer from './helpers/with-server.js';
 
-const pStreamPipeline = promisify(stream.pipeline);
-
 const defaultEndpoint: Handler = async (request, response) => {
 	response.setHeader('method', request.method);
-	await pStreamPipeline(request, response);
+	await streamPipeline(request, response);
 };
 
 const echoHeaders: Handler = (request, response) => {
@@ -76,7 +79,7 @@ test('sends Buffers', withServer, async (t, server, got) => {
 test('sends Streams', withServer, async (t, server, got) => {
 	server.post('/', defaultEndpoint);
 
-	const {body} = await got.post({body: toReadableStream('wow')});
+	const {body} = await got.post({body: stream.Readable.from('wow')});
 	t.is(body, 'wow');
 });
 
@@ -162,7 +165,7 @@ test('`content-length` header with Buffer body', withServer, async (t, server, g
 test('`content-length` header with Stream body', withServer, async (t, server, got) => {
 	server.post('/', echoHeaders);
 
-	const {body} = await got.post({body: toReadableStream('wow')});
+	const {body} = await got.post({body: stream.Readable.from('wow')});
 	const headers = JSON.parse(body);
 	t.is(headers['transfer-encoding'], 'chunked', 'likely failed to get headers at all');
 	t.is(headers['content-length'], undefined);
@@ -346,7 +349,7 @@ test('body - sends files with spec-compliant FormData', withServer, async (t, se
 	const fullPath = path.resolve('test/fixtures/ok');
 	const blobContent = 'Blob content';
 	const fileContent = 'File content';
-	const anotherFileContent = await fsPromises.readFile(fullPath, 'utf-8');
+	const anotherFileContent = await fsPromises.readFile(fullPath, 'utf8');
 	const expected = {
 		blob: blobContent,
 		file: fileContent,
@@ -358,6 +361,36 @@ test('body - sends files with spec-compliant FormData', withServer, async (t, se
 	form.set('file', new File([fileContent], 'file.txt', {type: 'text/plain'}));
 	form.set('anotherFile', await fileFromPath(fullPath, {type: 'text/plain'}));
 	const body = await got.post({body: form}).json<typeof expected>();
+	t.deepEqual(body, expected);
+});
+
+test('body - sends form-data with without known length', withServer, async (t, server, got) => {
+	server.post('/', echoMultipartBody);
+	const fullPath = path.resolve('test/fixtures/ok');
+
+	function getFileStream() {
+		const fileStream = fs.createReadStream(fullPath);
+		const passThrough = new stream.PassThrough();
+		fileStream.pipe(passThrough);
+		return passThrough;
+	}
+
+	const expected = {
+		file: await fsPromises.readFile(fullPath, 'utf8'),
+	};
+
+	const form = new FormDataNode();
+	form.set('file', {
+		[Symbol.toStringTag]: 'File',
+		type: 'text/plain',
+		name: 'file.txt',
+		stream() {
+			return getFileStream();
+		},
+	});
+
+	const body = await got.post({body: form}).json<typeof expected>();
+
 	t.deepEqual(body, expected);
 });
 

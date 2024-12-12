@@ -1,18 +1,20 @@
-import {EventEmitter} from 'events';
+import {EventEmitter} from 'node:events';
 import is from '@sindresorhus/is';
 import PCancelable from 'p-cancelable';
 import {
-	RequestError,
 	HTTPError,
 	RetryError,
+	type RequestError,
 } from '../core/errors.js';
 import Request from '../core/index.js';
-import {parseBody, isResponseOk} from '../core/response.js';
+import {
+	parseBody,
+	isResponseOk,
+	type Response, ParseError,
+} from '../core/response.js';
 import proxyEvents from '../core/utils/proxy-events.js';
 import type Options from '../core/options.js';
-import type {Response} from '../core/response.js';
-import {CancelError} from './types.js';
-import type {CancelableRequest} from './types.js';
+import {CancelError, type CancelableRequest} from './types.js';
 
 const proxiedRequestEvents = [
 	'request',
@@ -53,7 +55,7 @@ export default function asPromise<T>(firstRequest?: Request): CancelableRequest<
 			request.once('response', async (response: Response) => {
 				// Parse body
 				const contentEncoding = (response.headers['content-encoding'] ?? '').toLowerCase();
-				const isCompressed = contentEncoding === 'gzip' || contentEncoding === 'defalte' || contentEncoding === 'br';
+				const isCompressed = contentEncoding === 'gzip' || contentEncoding === 'deflate' || contentEncoding === 'br';
 
 				const {options} = request;
 
@@ -62,9 +64,14 @@ export default function asPromise<T>(firstRequest?: Request): CancelableRequest<
 				} else {
 					try {
 						response.body = parseBody(response, options.responseType, options.parseJson, options.encoding);
-					} catch (error) {
-						// Fallback to `utf8`
-						response.body = response.rawBody.toString();
+					} catch (error: any) {
+						// Fall back to `utf8`
+						try {
+							response.body = response.rawBody.toString();
+						} catch (error) {
+							request._beforeError(new ParseError(error as Error, response));
+							return;
+						}
 
 						if (isResponseOk(response)) {
 							request._beforeError(error);
@@ -76,11 +83,7 @@ export default function asPromise<T>(firstRequest?: Request): CancelableRequest<
 				try {
 					const hooks = options.hooks.afterResponse;
 
-					// TODO: `xo` should detect if `index` is being used for something else
-					// eslint-disable-next-line unicorn/no-for-loop
-					for (let index = 0; index < hooks.length; index++) {
-						const hook = hooks[index];
-
+					for (const [index, hook] of hooks.entries()) {
 						// @ts-expect-error TS doesn't notice that CancelableRequest is a Promise
 						// eslint-disable-next-line no-await-in-loop
 						response = await hook(response, async (updatedOptions): CancelableRequest<Response> => {
@@ -102,7 +105,7 @@ export default function asPromise<T>(firstRequest?: Request): CancelableRequest<
 							throw new TypeError('The `afterResponse` hook returned an invalid value');
 						}
 					}
-				} catch (error) {
+				} catch (error: any) {
 					request._beforeError(error);
 					return;
 				}
@@ -169,8 +172,13 @@ export default function asPromise<T>(firstRequest?: Request): CancelableRequest<
 		makeRequest(0);
 	}) as CancelableRequest<T>;
 
-	promise.on = (event: string, fn: (...args: any[]) => void) => {
-		emitter.on(event, fn);
+	promise.on = (event: string, function_: (...arguments_: any[]) => void) => {
+		emitter.on(event, function_);
+		return promise;
+	};
+
+	promise.off = (event: string, function_: (...arguments_: any[]) => void) => {
+		emitter.off(event, function_);
 		return promise;
 	};
 

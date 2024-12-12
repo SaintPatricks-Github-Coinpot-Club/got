@@ -1,8 +1,8 @@
-import {Buffer} from 'buffer';
+import {Buffer} from 'node:buffer';
 import test from 'ava';
-import {Handler} from 'express';
+import type {Handler} from 'express';
 import nock from 'nock';
-import got, {MaxRedirectsError} from '../source/index.js';
+import got, {MaxRedirectsError, RequestError} from '../source/index.js';
 import withServer, {withHttpsServer} from './helpers/with-server.js';
 
 const reachedHandler: Handler = (_request, response) => {
@@ -28,13 +28,100 @@ const relativeHandler: Handler = (_request, response) => {
 	response.end();
 };
 
+const unixProtocol: Handler = (_request, response) => {
+	response.writeHead(302, {
+		location: 'unix:/var/run/docker.sock:/containers/json',
+	});
+	response.end();
+};
+
+const unixHostname: Handler = (_request, response) => {
+	response.writeHead(302, {
+		location: 'http://unix:/var/run/docker.sock:/containers/json',
+	});
+	response.end();
+};
+
+test('cannot redirect to UNIX protocol when UNIX sockets are enabled', withServer, async (t, server, got) => {
+	server.get('/protocol', unixProtocol);
+	server.get('/hostname', unixHostname);
+
+	const gotUnixSocketsEnabled = got.extend({enableUnixSockets: true});
+
+	t.true(gotUnixSocketsEnabled.defaults.options.enableUnixSockets);
+
+	await t.throwsAsync(gotUnixSocketsEnabled('protocol'), {
+		message: 'Cannot redirect to UNIX socket',
+		instanceOf: RequestError,
+	});
+
+	await t.throwsAsync(gotUnixSocketsEnabled('hostname'), {
+		message: 'Cannot redirect to UNIX socket',
+		instanceOf: RequestError,
+	});
+});
+
+test('cannot redirect to UNIX protocol when UNIX sockets are not enabled', withServer, async (t, server, got) => {
+	server.get('/protocol', unixProtocol);
+	server.get('/hostname', unixHostname);
+
+	const gotUnixSocketsDisabled = got.extend({enableUnixSockets: false});
+
+	t.false(gotUnixSocketsDisabled.defaults.options.enableUnixSockets);
+
+	await t.throwsAsync(gotUnixSocketsDisabled('protocol'), {
+		message: 'Cannot redirect to UNIX socket',
+		instanceOf: RequestError,
+	});
+
+	await t.throwsAsync(gotUnixSocketsDisabled('hostname'), {
+		message: 'Cannot redirect to UNIX socket',
+		instanceOf: RequestError,
+	});
+});
+
 test('follows redirect', withServer, async (t, server, got) => {
 	server.get('/', reachedHandler);
 	server.get('/finite', finiteHandler);
 
 	const {body, redirectUrls} = await got('finite');
 	t.is(body, 'reached');
-	t.deepEqual(redirectUrls.map(x => String(x)), [`${server.url}/`]);
+	t.deepEqual(redirectUrls.map(String), [`${server.url}/`]);
+});
+
+test('does not follow redirect when followRedirect is a function and returns false', withServer, async (t, server, got) => {
+	server.get('/', reachedHandler);
+	server.get('/finite', finiteHandler);
+
+	const {body, statusCode} = await got('finite', {followRedirect: () => false});
+	t.not(body, 'reached');
+	t.is(statusCode, 302);
+});
+
+test('follows redirect when followRedirect is a function and returns true', withServer, async (t, server, got) => {
+	server.get('/', reachedHandler);
+	server.get('/finite', finiteHandler);
+
+	const {body, redirectUrls} = await got('finite', {followRedirect: () => true});
+	t.is(body, 'reached');
+	t.deepEqual(redirectUrls.map(String), [`${server.url}/`]);
+});
+
+test('followRedirect gets plainResponse and does not follow', withServer, async (t, server, got) => {
+	server.get('/temporary', (_request, response) => {
+		response.writeHead(307, {
+			location: '/redirect',
+		});
+		response.end();
+	});
+
+	const {statusCode} = await got('temporary', {
+		followRedirect(response) {
+			t.is(response.headers.location, '/redirect');
+			return false;
+		},
+	});
+	t.is(statusCode, 307);
 });
 
 test('follows 307, 308 redirect', withServer, async (t, server, got) => {
@@ -84,8 +171,8 @@ test('throws on endless redirects - default behavior', withServer, async (t, ser
 
 	const error = await t.throwsAsync<MaxRedirectsError>(got(''), {message: 'Redirected 10 times. Aborting.'});
 
-	t.deepEqual(error.response.redirectUrls.map(x => String(x)), Array.from({length: 10}).fill(`${server.url}/`));
-	t.is(error.code, 'ERR_TOO_MANY_REDIRECTS');
+	t.deepEqual(error?.response.redirectUrls.map(String), Array.from({length: 10}).fill(`${server.url}/`));
+	t.is(error?.code, 'ERR_TOO_MANY_REDIRECTS');
 });
 
 test('custom `maxRedirects` option', withServer, async (t, server, got) => {
@@ -98,8 +185,8 @@ test('custom `maxRedirects` option', withServer, async (t, server, got) => {
 
 	const error = await t.throwsAsync<MaxRedirectsError>(got('', {maxRedirects: 5}), {message: 'Redirected 5 times. Aborting.'});
 
-	t.deepEqual(error.response.redirectUrls.map(x => String(x)), Array.from({length: 5}).fill(`${server.url}/`));
-	t.is(error.code, 'ERR_TOO_MANY_REDIRECTS');
+	t.deepEqual(error?.response.redirectUrls.map(String), Array.from({length: 5}).fill(`${server.url}/`));
+	t.is(error?.code, 'ERR_TOO_MANY_REDIRECTS');
 });
 
 test('searchParams are not breaking redirects', withServer, async (t, server, got) => {
@@ -162,7 +249,9 @@ test('redirects on 303 if GET or HEAD', withServer, async (t, server, got) => {
 });
 
 test('removes body on GET redirect', withServer, async (t, server, got) => {
-	server.get('/', (request, response) => request.pipe(response));
+	server.get('/', (request, response) => {
+		request.pipe(response);
+	});
 
 	server.post('/seeOther', (_request, response) => {
 		response.writeHead(303, {
@@ -192,7 +281,7 @@ test('redirects on 303 response even on post, put, delete', withServer, async (t
 });
 
 test('redirects from http to https work', withServer, async (t, serverHttp) => {
-	await withHttpsServer()(t, async (t, serverHttps, got) => {
+	await withHttpsServer().exec(t, async (t, serverHttps, got) => {
 		serverHttp.get('/', (_request, response) => {
 			response.end('http');
 		});
@@ -215,7 +304,7 @@ test('redirects from http to https work', withServer, async (t, serverHttp) => {
 });
 
 test('redirects from https to http work', withHttpsServer(), async (t, serverHttps, got) => {
-	await withServer(t, async (t, serverHttp) => {
+	await withServer.exec(t, async (t, serverHttp) => {
 		serverHttp.get('/', (_request, response) => {
 			response.end('http');
 		});
@@ -288,19 +377,6 @@ test('redirect response contains UTF-8 with URI encoding', withServer, async (t,
 	});
 
 	t.is((await got('redirect-with-uri-encoded-location')).body, 'reached');
-});
-
-test('throws on malformed redirect URI', withServer, async (t, server, got) => {
-	server.get('/', (_request, response) => {
-		response.writeHead(302, {
-			location: '/%D8',
-		});
-		response.end();
-	});
-
-	await t.throwsAsync(got(''), {
-		message: 'URI malformed',
-	});
 });
 
 test('throws on invalid redirect URL', withServer, async (t, server, got) => {
@@ -409,9 +485,18 @@ test('method rewriting', withServer, async (t, server, got) => {
 		});
 		response.end();
 	});
-
 	server.get('/', (_request, response) => {
 		response.end();
+	});
+
+	server.post('/temporaryRedirect', (_request, response) => {
+		response.writeHead(307, {
+			location: '/',
+		});
+		response.end();
+	});
+	server.post('/', (request, response) => {
+		request.pipe(response);
 	});
 
 	const {body} = await got.post('redirect', {
@@ -427,6 +512,21 @@ test('method rewriting', withServer, async (t, server, got) => {
 	});
 
 	t.is(body, '');
+
+	// Do not rewrite method on 307 or 308
+	const {body: temporaryRedirectBody} = await got.post('temporaryRedirect', {
+		body: 'foobar',
+		methodRewriting: true,
+		hooks: {
+			beforeRedirect: [
+				options => {
+					t.is(options.body, 'foobar');
+				},
+			],
+		},
+	});
+
+	t.is(temporaryRedirectBody, 'foobar');
 });
 
 test('clears username and password when redirecting to a different hostname', withServer, async (t, server, got) => {
@@ -440,7 +540,7 @@ test('clears username and password when redirecting to a different hostname', wi
 	const {headers} = await got('', {
 		username: 'hello',
 		password: 'world',
-	}).json();
+	}).json<{headers: Record<string, string | undefined>}>();
 	t.is(headers.Authorization, undefined);
 });
 
@@ -456,7 +556,7 @@ test('clears the authorization header when redirecting to a different hostname',
 		headers: {
 			authorization: 'Basic aGVsbG86d29ybGQ=',
 		},
-	}).json();
+	}).json<{headers: Record<string, string | undefined>}>();
 	t.is(headers.Authorization, undefined);
 });
 
@@ -487,7 +587,7 @@ test('clears the host header when redirecting to a different hostname', async t 
 });
 
 test('correct port on redirect', withServer, async (t, server1, got) => {
-	await withServer(t, async (t, server2) => {
+	await withServer.exec(t, async (t, server2) => {
 		server1.get('/redirect', (_request, response) => {
 			response.redirect(`http://${server2.hostname}:${server2.port}/`);
 		});

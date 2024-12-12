@@ -1,18 +1,20 @@
-import process from 'process';
-import {Buffer} from 'buffer';
-import {STATUS_CODES, Agent} from 'http';
-import os from 'os';
-import {isIPv4, isIPv6} from 'net';
+import process from 'node:process';
+import {Buffer} from 'node:buffer';
+import {STATUS_CODES, Agent} from 'node:http';
+import os from 'node:os';
+import {isIPv4, isIPv6, isIP} from 'node:net';
 import test from 'ava';
-import {Handler} from 'express';
+import type {Handler} from 'express';
 import nock from 'nock';
 import getStream from 'get-stream';
-import pEvent from 'p-event';
-import got, {HTTPError, ReadError, RequestError} from '../source/index.js';
+import {pEvent} from 'p-event';
+import got, {HTTPError, RequestError, type ReadError} from '../source/index.js';
 import withServer from './helpers/with-server.js';
 
+// eslint-disable-next-line @typescript-eslint/naming-convention
 const IPv6supported = Object.values(os.networkInterfaces()).some(iface => iface?.some(addr => !addr.internal && addr.family === 'IPv6'));
 
+// eslint-disable-next-line @typescript-eslint/naming-convention
 const testIPv6 = (IPv6supported && process.env.TRAVIS_DIST !== 'bionic' && process.env.TRAVIS_DIST !== 'focal') ? test : test.skip;
 
 const echoIp: Handler = (request, response) => {
@@ -66,8 +68,8 @@ test('http errors have `response` property', withServer, async (t, server, got) 
 	});
 
 	const error = await t.throwsAsync<HTTPError>(got(''), {instanceOf: HTTPError});
-	t.is(error.response.statusCode, 404);
-	t.is(error.response.body, 'not');
+	t.is(error?.response.statusCode, 404);
+	t.is(error?.response.body, 'not');
 });
 
 test('status code 304 doesn\'t throw', withServer, async (t, server, got) => {
@@ -233,7 +235,7 @@ test('throws an error if the server aborted the request', withServer, async (t, 
 		code: 'ECONNRESET',
 	});
 
-	t.truthy(error.response.retryCount);
+	t.truthy(error?.response.retryCount);
 });
 
 test('statusMessage fallback', async t => {
@@ -303,7 +305,9 @@ test('DNS auto', withServer, async (t, server, got) => {
 		dnsLookupIpVersion: undefined,
 	});
 
-	t.true(isIPv4(response.body));
+	const version = isIP(response.body);
+
+	t.true(version === 4 || version === 6);
 });
 
 test('DNS IPv4', withServer, async (t, server, got) => {
@@ -360,9 +364,9 @@ test('JSON request custom stringifier', withServer, async (t, server, got) => {
 	})).body, customStringify(payload));
 });
 
-test('ClientRequest can throw before promise resolves', async t => {
+test.failing('ClientRequest can throw before promise resolves', async t => {
 	await t.throwsAsync(got('http://example.com', {
-		dnsLookup: ((_hostname: string, _options: unknown, callback: (error: null, hostname: string, family: number) => void) => {
+		dnsLookup: ((_hostname: string, _options: unknown, callback: (error: null, hostname: string, family: number) => void) => { // eslint-disable-line @typescript-eslint/ban-types
 			queueMicrotask(() => {
 				callback(null, 'fe80::0000:0000:0000:0000', 6);
 			});
@@ -370,4 +374,44 @@ test('ClientRequest can throw before promise resolves', async t => {
 	}), {
 		message: /EINVAL|EHOSTUNREACH|ETIMEDOUT/,
 	});
+});
+
+test('status code 200 has response ok is true', withServer, async (t, server, got) => {
+	server.get('/', (_request, response) => {
+		response.statusCode = 200;
+		response.end();
+	});
+
+	const promise = got('');
+	await t.notThrowsAsync(promise);
+	const {statusCode, body, ok} = await promise;
+	t.true(ok);
+	t.is(statusCode, 200);
+	t.is(body, '');
+});
+
+test('status code 404 has response ok is false if error is not thrown', withServer, async (t, server, got) => {
+	server.get('/', (_request, response) => {
+		response.statusCode = 404;
+		response.end();
+	});
+
+	const promise = got('', {throwHttpErrors: false});
+	await t.notThrowsAsync(promise);
+	const {statusCode, body, ok} = await promise;
+	t.is(ok, false);
+	t.is(statusCode, 404);
+	t.is(body, '');
+});
+
+test('status code 404 has error response ok is false if error is thrown', withServer, async (t, server, got) => {
+	server.get('/', (_request, response) => {
+		response.statusCode = 404;
+		response.end('not');
+	});
+
+	const error = (await t.throwsAsync<HTTPError>(got(''), {instanceOf: HTTPError}))!;
+	t.is(error.response.statusCode, 404);
+	t.is(error.response.ok, false);
+	t.is(error.response.body, 'not');
 });

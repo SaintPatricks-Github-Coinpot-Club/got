@@ -1,4 +1,3 @@
-import {URL, URLSearchParams} from 'url';
 import test from 'ava';
 import got, {Options} from '../source/index.js';
 
@@ -167,3 +166,18 @@ test('searchParams - multiple values for one key', t => {
 		['100', '200', '300'],
 	);
 });
+
+if (globalThis.AbortSignal !== undefined) {
+	test('signal does not get frozen', t => {
+		const controller = new AbortController();
+		const {signal} = controller;
+
+		const options = new Options({
+			url: new URL('http://localhost'),
+			signal,
+		});
+		options.freeze();
+
+		t.is(Object.isFrozen(options.signal), false);
+	});
+}

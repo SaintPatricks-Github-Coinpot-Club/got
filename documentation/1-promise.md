@@ -4,7 +4,7 @@
 
 Source code: [`source/as-promise/index.ts`](../source/as-promise/index.ts)
 
-The main Got function returns a [`Promise`](https://developer.mozilla.org/pl/docs/Web/JavaScript/Reference/Global_Objects/Promise).\
+The main Got function returns a [`Promise`](https://developer.mozilla.org/docs/Web/JavaScript/Reference/Global_Objects/Promise).\
 Although in order to support cancelation, [`PCancelable`](https://github.com/sindresorhus/p-cancelable) is used instead of pure `Promise`.
 
 ### <code>got(url: string | URL, options?: [OptionsInit](typescript.md#optionsinit), defaults?: [Options](2-options.md))</code>
@@ -89,3 +89,28 @@ Whether the promise is canceled.
 ### `promise.on(event, handler)`
 
 The events are the same as in [Stream API](3-streams.md#events).
+
+### `promise.off(event, handler)`
+
+Removes listener registered with [`promise.on`](1-promise.md#promiseonevent-handler)
+
+```js
+import {createReadStream} from 'node:fs';
+import got from 'got';
+
+const ongoingRequestPromise = got.post(uploadUrl, {
+    body: createReadStream('sample.txt')
+});
+
+const eventListener = (progress: Progress) => {
+    console.log(progress);
+};
+
+ongoingRequestPromise.on('uploadProgress', eventListener);
+
+setTimeout(() => {
+    ongoingRequestPromise.off('uploadProgress', eventListener);
+}, 500);
+
+await ongoingRequestPromise;
+```

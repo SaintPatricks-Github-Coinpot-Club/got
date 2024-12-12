@@ -1,17 +1,19 @@
-import {Buffer} from 'buffer';
-import {promisify} from 'util';
-import stream from 'stream';
-import fs from 'fs';
+import process from 'node:process';
+import {Buffer} from 'node:buffer';
+import {promisify} from 'node:util';
+import stream from 'node:stream';
+import {pipeline as streamPipeline} from 'node:stream/promises';
+import fs from 'node:fs';
 // @ts-expect-error Fails to find slow-stream/index.d.ts
 import SlowStream from 'slow-stream';
-import toReadableStream from 'to-readable-stream';
 import getStream from 'get-stream';
 import FormData from 'form-data';
-import tempy from 'tempy';
+import {temporaryFile} from 'tempy';
 import is from '@sindresorhus/is';
-import test, {ExecutionContext} from 'ava';
-import {Handler} from 'express';
-import {Progress} from '../source/index.js';
+import test, {type ExecutionContext} from 'ava';
+import type {Handler} from 'express';
+import {pEvent} from 'p-event';
+import type {Progress} from '../source/index.js';
 import withServer from './helpers/with-server.js';
 
 const checkEvents = (t: ExecutionContext, events: Progress[], bodySize?: number) => {
@@ -48,14 +50,17 @@ const file = Buffer.alloc(1024 * 1024 * 2);
 const downloadEndpoint: Handler = (_request, response) => {
 	response.setHeader('content-length', file.length);
 
-	stream.pipeline(
-		toReadableStream(file),
-		new SlowStream({maxWriteInterval: 50}),
-		response,
-		() => {
-			response.end();
-		},
-	);
+	(async () => {
+		try {
+			await streamPipeline(
+				stream.Readable.from(file),
+				new SlowStream({maxWriteInterval: 50}),
+				response,
+			);
+		} catch {}
+
+		response.end();
+	})();
 };
 
 const noTotalEndpoint: Handler = (_request, response) => {
@@ -64,13 +69,16 @@ const noTotalEndpoint: Handler = (_request, response) => {
 };
 
 const uploadEndpoint: Handler = (request, response) => {
-	stream.pipeline(
-		request,
-		new SlowStream({maxWriteInterval: 100}),
-		() => {
-			response.end();
-		},
-	);
+	(async () => {
+		try {
+			await streamPipeline(
+				request,
+				new SlowStream({maxWriteInterval: 100}),
+			);
+		} catch {}
+
+		response.end();
+	})();
 };
 
 test('download progress', withServer, async (t, server, got) => {
@@ -121,7 +129,7 @@ test('upload progress - file', withServer, async (t, server, got) => {
 test('upload progress - file stream', withServer, async (t, server, got) => {
 	server.post('/', uploadEndpoint);
 
-	const path = tempy.file();
+	const path = temporaryFile();
 	fs.writeFileSync(path, file);
 
 	const {size} = await promisify(fs.stat)(path);
@@ -176,11 +184,12 @@ test('upload progress - stream with known body size', withServer, async (t, serv
 	};
 
 	const request = got.stream.post(options)
-		.on('uploadProgress', event => events.push(event));
+		.on('uploadProgress', event => {
+			events.push(event);
+		});
 
-	await getStream(
-		stream.pipeline(toReadableStream(file), request, () => {}),
-	);
+	await streamPipeline(stream.Readable.from(file), request);
+	await getStream(request);
 
 	checkEvents(t, events, file.length);
 });
@@ -191,11 +200,12 @@ test('upload progress - stream with unknown body size', withServer, async (t, se
 	const events: Progress[] = [];
 
 	const request = got.stream.post('')
-		.on('uploadProgress', event => events.push(event));
+		.on('uploadProgress', event => {
+			events.push(event);
+		});
 
-	await getStream(
-		stream.pipeline(toReadableStream(file), request, () => {}),
-	);
+	await streamPipeline(stream.Readable.from(file), request);
+	await getStream(request);
 
 	t.is(events[0]?.total, undefined);
 	checkEvents(t, events);
@@ -220,4 +230,73 @@ test('upload progress - no body', withServer, async (t, server, got) => {
 			total: 0,
 		},
 	]);
+});
+
+test('upload progress - no events when immediatly removed listener', withServer, async (t, server, got) => {
+	server.post('/', uploadEndpoint);
+
+	const events: Progress[] = [];
+
+	const listener = (event: Progress) => events.push(event);
+
+	const promise = got.post('')
+		.on('uploadProgress', listener)
+		.off('uploadProgress', listener);
+
+	await promise;
+
+	t.is(events.length, 0);
+});
+
+test('upload progress - one event when removed listener', withServer, async (t, server, got) => {
+	server.post('/', uploadEndpoint);
+
+	const events: Progress[] = [];
+
+	const promise = got.post('');
+
+	const listener = (event: Progress) => {
+		events.push(event);
+		void promise.off('uploadProgress', listener);
+	};
+
+	void promise.on('uploadProgress', listener);
+
+	await promise;
+
+	t.deepEqual(events, [
+		{
+			percent: 0,
+			transferred: 0,
+			total: undefined,
+		},
+	]);
+});
+
+test('does not emit uploadProgress after cancelation', withServer, async (t, server, got) => {
+	server.post('/', () => {});
+
+	const stream = got.stream.post();
+
+	stream.once('uploadProgress', () => { // 0%
+		stream.once('uploadProgress', () => { // 'foo'
+			stream.write('bar');
+
+			process.nextTick(() => {
+				process.nextTick(() => {
+					stream.on('uploadProgress', () => {
+						t.fail('Emitted uploadProgress after cancelation');
+					});
+
+					stream.destroy();
+				});
+			});
+		});
+	});
+
+	stream.write('foo');
+
+	await pEvent(stream, 'close');
+
+	t.pass();
 });

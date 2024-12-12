@@ -16,18 +16,18 @@ function isRequest(x: unknown): x is Request {
 An error to be thrown when a request fails.
 Contains a `code` property with error class code, like `ECONNREFUSED`.
 */
-export class RequestError extends Error {
+export class RequestError<T = unknown> extends Error {
 	input?: string;
 
 	code: string;
-	stack!: string;
+	override stack!: string;
 	declare readonly options: Options;
-	readonly response?: Response;
+	readonly response?: Response<T>;
 	readonly request?: Request;
 	readonly timings?: Timings;
 
 	constructor(message: string, error: Partial<Error & {code?: string}>, self: Request | Options) {
-		super(message);
+		super(message, {cause: error});
 		Error.captureStackTrace(this, this.constructor);
 
 		this.name = 'RequestError';
@@ -88,8 +88,10 @@ export class MaxRedirectsError extends RequestError {
 An error to be thrown when the server response code is not 2xx nor 3xx if `options.followRedirect` is `true`, but always except for 304.
 Includes a `response` property.
 */
-export class HTTPError extends RequestError {
-	declare readonly response: Response;
+// TODO: Change `HTTPError<T = any>` to `HTTPError<T = unknown>` in the next major version to enforce type usage.
+// eslint-disable-next-line @typescript-eslint/naming-convention
+export class HTTPError<T = any> extends RequestError<T> {
+	declare readonly response: Response<T>;
 	declare readonly request: Request;
 	declare readonly timings: Timings;
 
@@ -133,7 +135,7 @@ Includes an `event` and `timings` property.
 */
 export class TimeoutError extends RequestError {
 	declare readonly request: Request;
-	readonly timings: Timings;
+	override readonly timings: Timings;
 	readonly event: string;
 
 	constructor(error: TimedOutTimeoutError, timings: Timings, request: Request) {
@@ -167,5 +169,16 @@ export class RetryError extends RequestError {
 		super('Retrying', {}, request);
 		this.name = 'RetryError';
 		this.code = 'ERR_RETRYING';
+	}
+}
+
+/**
+An error to be thrown when the request is aborted by AbortController.
+*/
+export class AbortError extends RequestError {
+	constructor(request: Request) {
+		super('This operation was aborted.', {}, request);
+		this.code = 'ERR_ABORTED';
+		this.name = 'AbortError';
 	}
 }

@@ -1,10 +1,11 @@
-import {Agent as HttpAgent} from 'http';
-import {Agent as HttpsAgent} from 'https';
-import test, {Constructor} from 'ava';
+import {Agent as HttpAgent} from 'node:http';
+import {Agent as HttpsAgent} from 'node:https';
+import test from 'ava';
 import sinon from 'sinon';
+import type {Constructor} from 'type-fest';
 import withServer, {withHttpsServer} from './helpers/with-server.js';
 
-const createAgentSpy = <T extends HttpsAgent>(AgentClass: Constructor): {agent: T; spy: sinon.SinonSpy} => {
+const createAgentSpy = <T extends HttpsAgent>(AgentClass: Constructor<any>): {agent: T; spy: sinon.SinonSpy} => {
 	const agent: T = new AgentClass({keepAlive: true});
 	// eslint-disable-next-line import/no-named-as-default-member
 	const spy = sinon.spy(agent, 'addRequest' as any);
@@ -54,7 +55,7 @@ test('non-object agent option works with https', withHttpsServer(), async (t, se
 });
 
 test('redirects from http to https work with an agent object', withServer, async (t, serverHttp) => {
-	await withHttpsServer()(t, async (t, serverHttps, got) => {
+	await withHttpsServer().exec(t, async (t, serverHttps, got) => {
 		serverHttp.get('/', (_request, response) => {
 			response.end('http');
 		});
@@ -90,7 +91,7 @@ test('redirects from http to https work with an agent object', withServer, async
 });
 
 test('redirects from https to http work with an agent object', withHttpsServer(), async (t, serverHttps, got) => {
-	await withServer(t, async (t, serverHttp) => {
+	await withServer.exec(t, async (t, serverHttp) => {
 		serverHttp.get('/', (_request, response) => {
 			response.end('http');
 		});
@@ -178,7 +179,6 @@ test('no socket hung up regression', withServer, async (t, server, got) => {
 			afterResponse: [
 				async (response, retryWithMergedOptions) => {
 					// Force clean-up
-					// eslint-disable-next-line @typescript-eslint/no-confusing-void-expression
 					response.socket?.destroy();
 
 					// Unauthorized
@@ -204,4 +204,18 @@ test('no socket hung up regression', withServer, async (t, server, got) => {
 	t.is(body, 'ok');
 
 	agent.destroy();
+});
+
+test('accept undefined agent', withServer, async (t, server, got) => {
+	server.get('/', (_request, response) => {
+		response.end('ok');
+	});
+
+	const undefinedAgent = undefined;
+	t.truthy((await got({
+		https: {
+			rejectUnauthorized: false,
+		},
+		agent: undefinedAgent,
+	})).body);
 });
